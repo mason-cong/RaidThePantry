@@ -1,11 +1,21 @@
 using Microsoft.EntityFrameworkCore;
+using RecipeApi.Application.Interfaces;
+using RecipeApi.Application.Services;
+using RecipeApi.Infrastructure.Auth;
 using RecipeApi.Infrastructure.Persistence;
+using RecipeApi.Infrastructure.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<RecipeDbContext>(opt =>
     opt.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
 
+builder.Services.AddScoped<IRecipeRepository, RecipeRepository>();
+builder.Services.AddScoped<ILookupRepository, LookupRepository>();
+builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddScoped<RecipeService>();
+
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
