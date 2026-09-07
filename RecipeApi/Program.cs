@@ -18,6 +18,16 @@ builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
 
 var app = builder.Build();
 
+// `dotnet run --project RecipeApi -- --seed [--reset]` seeds and exits without
+// starting the web host.
+if (args.Contains("--seed"))
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<RecipeDbContext>();
+    await DbSeeder.SeedAsync(db, reset: args.Contains("--reset"));
+    return;
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
