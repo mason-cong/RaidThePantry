@@ -50,6 +50,23 @@ dotnet run --project RecipeApi --launch-profile http
 - Swagger: http://localhost:5282/swagger
 - Health: http://localhost:5282/health → `{"status":"ok","database":"connected"}`
 
+## Accounts
+
+Browsing needs no account. `POST /api/auth/register` and `/api/auth/login` both
+return a bearer token; `GET /api/auth/me` reports the signed-in account and is
+the cheap way for a frontend to check whether its token is still valid.
+
+Passwords require 10 characters and nothing else — no uppercase/digit/symbol
+rules. That follows NIST SP 800-63B: composition rules mostly yield `Password1!`,
+which is predictable to an attacker and irritating to everyone else, while a
+longer passphrase is both stronger and easier to remember. The rule lives in
+`AuthServiceCollectionExtensions` and is mirrored by `MinLength` on
+`RegisterRequest` — change both together or the two validators disagree.
+
+In Development, a missing `Jwt:SigningKey` falls back to a random ephemeral key
+with a warning, so a fresh clone runs without configuration. Tokens then stop
+working across restarts. Outside Development a missing key is a startup error.
+
 ## Database notes
 
 The initial migration contains hand-written SQL alongside the EF-generated

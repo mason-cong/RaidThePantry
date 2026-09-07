@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.OpenApi;
 using RecipeApi.Application.Interfaces;
 using RecipeApi.Application.Services;
 using RecipeApi.Infrastructure.Auth;
@@ -15,10 +16,30 @@ builder.Services.AddScoped<ILookupRepository, LookupRepository>();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<RecipeService>();
 
+// Identity + JWT. Anonymous callers are unaffected: authentication only fills in
+// claims when a token is present, and authorization only bites on [Authorize].
+builder.Services.AddRecipeAuth(builder.Configuration, builder.Environment);
+
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(o =>
+{
+    o.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Token from /api/auth/login. Swagger adds the 'Bearer ' prefix for you."
+    });
+
+    o.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+    {
+        { new OpenApiSecuritySchemeReference("Bearer", document), new List<string>() }
+    });
+});
 
 // Fallback rather than `Configuration["..."]!` — a missing key should not take
 // the whole app down at startup.
@@ -46,8 +67,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
-// Auth middleware is wired in build-order step 7, alongside Identity and the
-// JWT token service. Until then every endpoint is anonymous.
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 
