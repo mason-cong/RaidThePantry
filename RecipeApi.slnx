@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="RecipeApi.Worker/RecipeApi.Worker.csproj" />
+  <Project Path="RecipeApi/RecipeApi.csproj" />
+</Solution>
