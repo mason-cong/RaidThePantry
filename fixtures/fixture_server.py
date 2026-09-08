@@ -126,7 +126,21 @@ ROUTES = {
     "/no-jsonld": "<!doctype html><html><body><h1>Nothing structured here</h1></body></html>",
     # Usable-check: has a name but no ingredients or steps.
     "/incomplete": page({"@context": "https://schema.org", "@type": "Recipe", "name": "Nameless Only"}),
+    # Reachable and perfectly valid, but robots.txt puts it off limits.
+    "/blocked/secret-recipe": page(SIMPLE),
 }
+
+# A wildcard group the crawler must obey, plus a named group that takes
+# precedence over it, plus an Allow carving an exception out of a Disallow.
+ROBOTS = """\
+User-agent: *
+Disallow: /
+
+User-agent: RecipeFinderBot
+Crawl-delay: 0
+Disallow: /blocked/
+Allow: /
+"""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -147,6 +161,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+
+        if path == "/robots.txt":
+            return self._send(200, ROBOTS.encode(), "text/plain; charset=utf-8")
 
         if path in ROUTES:
             return self._send(200, ROUTES[path].encode())

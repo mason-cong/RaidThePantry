@@ -26,12 +26,24 @@ public interface IRecipeRepository
     /// That get-or-create is a database concern, so it lives here rather than in
     /// a mapper — an Application-layer mapper has no way to look up existing rows.
     /// </summary>
+    /// <param name="createdByUserId">
+    /// Null for scraped recipes, which deliberately have no owner and so can be
+    /// edited by nobody through the API.
+    /// </param>
     Task<Guid> CreateAsync(
         CreateRecipeRequest request,
-        Guid createdByUserId,
+        Guid? createdByUserId,
         RecipeSourceType sourceType,
         string? sourceUrl,
         CancellationToken ct);
+
+    /// <summary>
+    /// Replaces an unowned (scraped) recipe in place, for the Worker's re-promote
+    /// path. Refuses anything with an owner, so it cannot be used to sidestep the
+    /// ownership rule. Updating rather than delete-and-recreate keeps the recipe
+    /// id stable, so favorites and links survive a re-promote.
+    /// </summary>
+    Task<WriteResult> ReplaceScrapedAsync(Guid id, CreateRecipeRequest request, CancellationToken ct);
 
     Task<WriteResult> UpdateAsync(Guid id, CreateRecipeRequest request, Guid currentUserId, CancellationToken ct);
 

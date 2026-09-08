@@ -21,15 +21,17 @@ builder.Services.AddScoped<RecipeService>();
 builder.Services.AddScoped<RecipeImportService>();
 
 builder.Services.Configure<ScrapingOptions>(builder.Configuration.GetSection(ScrapingOptions.SectionName));
-builder.Services.AddHttpClient<IRecipeUrlImporter, RecipeUrlImporter>((sp, client) =>
+builder.Services.AddHttpClient<PageFetcher>((sp, client) =>
     {
         var scraping = sp.GetRequiredService<IOptions<ScrapingOptions>>().Value;
         client.Timeout = TimeSpan.FromSeconds(scraping.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.ParseAdd(scraping.UserAgent);
     })
-    // Redirects are followed by hand in RecipeUrlImporter so every hop is
-    // re-checked against the SSRF guard; automatic redirects would bypass it.
+    // Redirects are followed by hand in PageFetcher so every hop is re-checked
+    // against the SSRF guard; automatic redirects would bypass it.
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+
+builder.Services.AddScoped<IRecipeUrlImporter, RecipeUrlImporter>();
 
 // Identity + JWT. Anonymous callers are unaffected: authentication only fills in
 // claims when a token is present, and authorization only bites on [Authorize].

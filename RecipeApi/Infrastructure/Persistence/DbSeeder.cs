@@ -52,7 +52,13 @@ public static class DbSeeder
             await db.Ingredients.ExecuteDeleteAsync(ct);
             await db.Cuisines.ExecuteDeleteAsync(ct);
             await db.Tags.ExecuteDeleteAsync(ct);
-            Console.WriteLine("Cleared existing recipe data.");
+
+            // Staging too: ScrapedPage.PromotedRecipeId has no foreign key, so
+            // leaving these behind would point them at deleted recipes and make
+            // a later `promote --repromote` act on rows that no longer exist.
+            await db.ScrapedPages.ExecuteDeleteAsync(ct);
+
+            Console.WriteLine("Cleared existing recipe data and scrape staging.");
         }
         else if (await db.Recipes.AnyAsync(ct))
         {

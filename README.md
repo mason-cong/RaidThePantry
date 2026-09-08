@@ -98,6 +98,42 @@ That flag must stay false anywhere reachable. The fixture server also serves the
 failure cases — redirect-to-metadata, oversized pages, non-HTML responses, and
 pages with malformed or absent JSON-LD.
 
+## Bulk scraping (RecipeApi.Worker)
+
+Two commands, deliberately separate, because fetching is the expensive
+rate-limited half and transforming is the cheap half that keeps changing.
+
+```bash
+dotnet run --project RecipeApi.Worker -- scrape urls.txt [--refetch]
+dotnet run --project RecipeApi.Worker -- promote [--repromote]
+dotnet run --project RecipeApi.Worker -- status
+```
+
+**`scrape`** fetches each URL into `staging.ScrapedPages` and never touches
+`Recipes`. It honors `robots.txt` — a named group for `RecipeFinderBot` beats
+the wildcard group, longest-matching rule wins, and `Crawl-delay` overrides the
+politeness default when a site asks for more. Pages where extraction succeeds
+store just the recipe's JSON-LD node (a few KB); pages where it fails store the
+whole HTML, because those are exactly the corpus `HtmlFallbackParser` needs.
+Re-running skips URLs already staged unless `--refetch` is passed.
+
+**`promote`** turns staged pages into recipes with `SourceType = BulkScrape` and
+**no owner**, which is what makes them read-only through the API. It makes no
+network calls, so it is fast and freely re-runnable over the whole corpus.
+
+After changing the normalizer or mapper, raise `Scraping:ParserVersion` and run
+`promote --repromote`. Rows promoted under an older version are re-transformed
+from the staged JSON — **no re-crawl**. Re-promotion updates each recipe in
+place rather than delete-and-recreate, so ids stay stable and favorites survive.
+
+Politeness is not permission: check a site's terms before pointing the crawler
+at it. To test against the fixture server instead:
+
+```bash
+python fixtures/fixture_server.py 8099
+Scraping__AllowLoopbackHosts=true dotnet run --project RecipeApi.Worker -- scrape urls.txt
+```
+
 ## Database notes
 
 The initial migration contains hand-written SQL alongside the EF-generated

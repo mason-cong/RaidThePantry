@@ -17,4 +17,20 @@ public class ScrapingOptions
 
     /// <summary>Identifies the crawler honestly, with a contact route.</summary>
     public string UserAgent { get; set; } = "RecipeFinderBot/0.1 (+https://example.com/bot)";
+
+    /// <summary>The name robots.txt groups are matched against.</summary>
+    public string UserAgentToken { get; set; } = "RecipeFinderBot";
+
+    /// <summary>
+    /// Minimum gap between bulk-crawl requests. A site's own Crawl-delay wins
+    /// when it asks for more.
+    /// </summary>
+    public double PolitenessDelaySeconds { get; set; } = 1.0;
+
+    /// <summary>
+    /// Stamped onto every staged page at promote time. Raising it marks the
+    /// existing corpus as promoted by an older transform, which is what
+    /// `promote --repromote` re-runs after the normalizer changes.
+    /// </summary>
+    public int ParserVersion { get; set; } = 1;
 }

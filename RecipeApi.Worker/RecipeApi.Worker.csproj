@@ -4,6 +4,13 @@
     <ProjectReference Include="..\RecipeApi\RecipeApi.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- A console host reads configuration from the output directory, so this
+         has to be copied there; unlike a web project it is not implicit. -->
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="appsettings.Development.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('appsettings.Development.json')" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>

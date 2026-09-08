@@ -123,7 +123,7 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
 
     public async Task<Guid> CreateAsync(
         CreateRecipeRequest request,
-        Guid createdByUserId,
+        Guid? createdByUserId,
         RecipeSourceType sourceType,
         string? sourceUrl,
         CancellationToken ct)
@@ -180,11 +180,15 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
     public async Task<WriteResult> UpdateAsync(
         Guid id, CreateRecipeRequest request, Guid currentUserId, CancellationToken ct)
     {
+        // AsSplitQuery: four collection Includes in one statement is a cartesian
+        // product — 9 ingredients x 5 steps x 2 cuisines x 3 tags is 270 rows to
+        // materialize 19. EF warns about exactly this.
         var recipe = await context.Recipes
             .Include(r => r.Ingredients)
             .Include(r => r.Steps)
             .Include(r => r.Cuisines)
             .Include(r => r.Tags)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(r => r.Id == id, ct);
 
         if (recipe is null)
@@ -206,6 +210,47 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
         // owned by exactly one recipe and carries no identity a client refers to,
         // so a diff would buy nothing but a chance to get it wrong. Clearing a
         // required relationship marks the orphans deleted.
+        recipe.Ingredients.Clear();
+        recipe.Steps.Clear();
+        recipe.Cuisines.Clear();
+        recipe.Tags.Clear();
+
+        await PopulateChildrenAsync(recipe, request, ct);
+        await context.SaveChangesAsync(ct);
+
+        return WriteResult.Success;
+    }
+
+    public async Task<WriteResult> ReplaceScrapedAsync(Guid id, CreateRecipeRequest request, CancellationToken ct)
+    {
+        // AsSplitQuery: four collection Includes in one statement is a cartesian
+        // product — 9 ingredients x 5 steps x 2 cuisines x 3 tags is 270 rows to
+        // materialize 19. EF warns about exactly this.
+        var recipe = await context.Recipes
+            .Include(r => r.Ingredients)
+            .Include(r => r.Steps)
+            .Include(r => r.Cuisines)
+            .Include(r => r.Tags)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
+
+        if (recipe is null)
+            return WriteResult.NotFound;
+
+        // Hard refusal on owned recipes. Without this the Worker would be a way
+        // around the creator-only rule everything else enforces.
+        if (recipe.CreatedByUserId is not null)
+            return WriteResult.Forbidden;
+
+        recipe.Title = request.Title.Trim();
+        recipe.Description = request.Description?.Trim();
+        recipe.PrepTimeMinutes = request.PrepTimeMinutes;
+        recipe.CookTimeMinutes = request.CookTimeMinutes;
+        recipe.Servings = request.Servings;
+        recipe.Difficulty = request.Difficulty;
+        recipe.ImageUrl = request.ImageUrl?.Trim();
+        recipe.UpdatedAt = DateTimeOffset.UtcNow;
+
         recipe.Ingredients.Clear();
         recipe.Steps.Clear();
         recipe.Cuisines.Clear();

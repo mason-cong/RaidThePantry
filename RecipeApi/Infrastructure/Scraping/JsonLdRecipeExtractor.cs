@@ -24,7 +24,18 @@ public partial class JsonLdRecipeExtractor
 
     private readonly HtmlParser _parser = new();
 
-    public SchemaOrgRecipe? Extract(string html)
+    /// <summary>Recipe plus the raw JSON of the node it came from, for staging.</summary>
+    public record Extraction(SchemaOrgRecipe Recipe, string RawJson);
+
+    public SchemaOrgRecipe? Extract(string html) => ExtractDetailed(html)?.Recipe;
+
+    /// <summary>
+    /// Also returns the recipe node's own JSON. staging.ScrapedPage keeps that
+    /// rather than the whole page: it is a few KB instead of hundreds, and it is
+    /// everything <see cref="FromRecipeJson"/> needs to replay the transform
+    /// after a normalizer change, without re-crawling.
+    /// </summary>
+    public Extraction? ExtractDetailed(string html)
     {
         if (string.IsNullOrWhiteSpace(html))
             return null;
@@ -47,7 +58,7 @@ public partial class JsonLdRecipeExtractor
                 // Mapped inside the using: a JsonElement does not outlive its document.
                 var recipe = Map(node);
                 if (recipe.IsUsable)
-                    return recipe;
+                    return new Extraction(recipe, node.GetRawText());
             }
             catch (JsonException)
             {
@@ -56,6 +67,24 @@ public partial class JsonLdRecipeExtractor
         }
 
         return null;
+    }
+
+    /// <summary>Re-maps a previously staged recipe node. The promote path's entry point.</summary>
+    public SchemaOrgRecipe? FromRecipeJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            using var parsed = JsonDocument.Parse(json, JsonOptions);
+            var recipe = Map(parsed.RootElement);
+            return recipe.IsUsable ? recipe : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static JsonElement? FindRecipeNode(JsonElement node, int depth)
