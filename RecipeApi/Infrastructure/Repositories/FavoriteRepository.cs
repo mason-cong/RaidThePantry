@@ -35,7 +35,7 @@ public class FavoriteRepository(RecipeDbContext context) : IFavoriteRepository
                 f.Recipe.ImageUrl,
                 f.Recipe.PrepTimeMinutes + f.Recipe.CookTimeMinutes,
                 f.Recipe.Difficulty,
-                f.Recipe.Cuisines.Select(rc => rc.Cuisine.Name).ToList(),
+                f.Recipe.Cuisines.OrderBy(rc => rc.Cuisine.Name).Select(rc => rc.Cuisine.Name).ToList(),
                 // Everything in this list is favorited by definition — no subquery.
                 true))
             .ToListAsync(ct);

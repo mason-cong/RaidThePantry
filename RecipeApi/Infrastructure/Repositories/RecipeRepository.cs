@@ -25,7 +25,7 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
             r.ImageUrl,
             r.PrepTimeMinutes + r.CookTimeMinutes,
             r.Difficulty,
-            r.Cuisines.Select(rc => rc.Cuisine.Name).ToList(),
+            r.Cuisines.OrderBy(rc => rc.Cuisine.Name).Select(rc => rc.Cuisine.Name).ToList(),
             false);
 
     /// <summary>
@@ -40,7 +40,7 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
             r.ImageUrl,
             r.PrepTimeMinutes + r.CookTimeMinutes,
             r.Difficulty,
-            r.Cuisines.Select(rc => rc.Cuisine.Name).ToList(),
+            r.Cuisines.OrderBy(rc => rc.Cuisine.Name).Select(rc => rc.Cuisine.Name).ToList(),
             context.UserFavorites.Any(f => f.RecipeId == r.Id && f.UserId == userId));
 
     public async Task<PagedResult<RecipeSummaryDto>> SearchAsync(
@@ -137,8 +137,11 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
                         ri.Ingredient.Name, ri.Quantity, ri.Unit, ri.RawText))
                     .ToList(),
                 r.Steps.OrderBy(s => s.Order).Select(s => s.Instruction).ToList(),
-                r.Cuisines.Select(rc => rc.Cuisine.Name).ToList(),
-                r.Tags.Select(rt => rt.Tag.Name).ToList()))
+                // Ordered so the same request always serializes identically — an
+                // unordered projection lets the database return these in any order
+                // it likes, reshuffling a client's rendered list between calls.
+                r.Cuisines.OrderBy(rc => rc.Cuisine.Name).Select(rc => rc.Cuisine.Name).ToList(),
+                r.Tags.OrderBy(rt => rt.Tag.Name).Select(rt => rt.Tag.Name).ToList()))
             .FirstOrDefaultAsync(ct);
     }
 

@@ -29,7 +29,12 @@ public static partial class IsoDurationParser
             var seconds = Number(match, "s");
 
             var total = weeks * 7 * 24 * 60 + days * 24 * 60 + hours * 60 + minutes + seconds / 60;
-            return total > 0 ? (int)Math.Round(total) : null;
+
+            // Checked after rounding, not before: "PT30S" is 0.5 minutes, which
+            // passes a `total > 0` test and then rounds to 0 — reporting a known
+            // zero rather than "no usable duration".
+            var rounded = (int)Math.Round(total);
+            return rounded > 0 ? rounded : null;
         }
 
         // "45 minutes", "1 hr 30 min" — common enough in the wild to be worth catching.

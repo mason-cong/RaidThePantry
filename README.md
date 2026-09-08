@@ -50,6 +50,43 @@ dotnet run --project RecipeApi --launch-profile http
 - Swagger: http://localhost:5282/swagger
 - Health: http://localhost:5282/health → `{"status":"ok","database":"connected"}`
 
+## Tests
+
+```bash
+docker compose up -d          # the suite needs a live PostgreSQL
+dotnet test
+```
+
+157 tests, about 30 seconds. They boot the real application in-process with
+`WebApplicationFactory` and run against a real database — nothing is
+substituted for a fake. That is deliberate: the defects this suite exists to
+catch are EF translation failures, LIKE escaping, index behaviour, unique
+constraints and cascades, and every one of them would pass against an in-memory
+provider.
+
+The suite uses its own database, **`recipefinder_test`**, created on first run.
+Your development data is never touched. Point `RECIPEFINDER_TEST_POSTGRES` at
+another server to override the connection.
+
+Test classes share one application and run sequentially, re-seeding to the known
+18-recipe fixture before each class, so no test depends on what ran before it.
+
+What is covered:
+
+| Area | What it pins down |
+|---|---|
+| `GuestAccessTests` | every read endpoint serves anonymous callers |
+| `SearchTests` | the four search defects: AND-of-EXISTS keywords, LIKE escaping, sort tiebreakers, page clamping |
+| `AuthTests` | registration, login, and that login is not an account-existence oracle |
+| `RecipeWriteTests` | creator-only ownership, 403 vs 404, ingredient normalization and reuse |
+| `FavoritesTests` | idempotent save/unsave, per-account isolation, cascade on recipe delete |
+| `ImportTests` | JSON-LD shapes, and the SSRF guard including redirect-to-metadata |
+| `Unit/` | `IngredientNormalizer` and `IsoDurationParser` directly — fast and precise |
+
+`ImportTests` starts a real HTTP server on loopback rather than stubbing
+`HttpClient`, because redirect following, the size ceiling and the per-hop host
+check are the parts worth testing.
+
 ## Accounts
 
 Browsing needs no account. `POST /api/auth/register` and `/api/auth/login` both

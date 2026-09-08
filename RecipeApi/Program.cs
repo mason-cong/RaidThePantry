@@ -96,3 +96,11 @@ app.MapGet("/health", async (RecipeDbContext db, CancellationToken ct) =>
         : Results.StatusCode(503));
 
 app.Run();
+
+/// <summary>
+/// Top-level statements compile into an internal Program class, which
+/// WebApplicationFactory&lt;Program&gt; cannot reach. Declaring it public here is
+/// what lets the integration tests boot this exact application rather than a
+/// reassembled copy of it.
+/// </summary>
+public partial class Program;

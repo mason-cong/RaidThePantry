@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/RecipeApi.IntegrationTests/RecipeApi.IntegrationTests.csproj" />
+  </Folder>
   <Project Path="RecipeApi.Worker/RecipeApi.Worker.csproj" />
   <Project Path="RecipeApi/RecipeApi.csproj" />
 </Solution>

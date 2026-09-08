@@ -146,8 +146,15 @@ public partial class IngredientNormalizer : IIngredientNormalizer
     // Anchoring matters twice over. A \b-delimited pattern never matches "500g"
     // at all, because there is no word boundary between a digit and a letter.
     // And stripping every number in the string destroys digits that are part of
-    // the name — "00 flour" becomes "flour", "70% dark chocolate" becomes
-    // "% dark chocolate". Only the leading run is ever a measurement.
-    [GeneratedRegex(@"^(\s*\d+(\.\d+)?(\s*[-–/]\s*\d+(\.\d+)?)?)+\s*")]
+    // the name — "00 flour" becomes "flour". Only the leading run is ever a
+    // measurement.
+    //
+    // The (?![\d%]) guard stops a percentage being read as a quantity, so
+    // normalizing the already-canonical "70% dark chocolate" leaves it alone
+    // instead of producing "% dark chocolate" and a duplicate ingredient row.
+    // The class must reject a following digit as well as the percent sign:
+    // with only (?!%), the engine backtracks to matching "7" and strips that
+    // instead, which is worse than not matching at all.
+    [GeneratedRegex(@"^(\s*\d+(\.\d+)?(?![\d%])(\s*[-–/]\s*\d+(\.\d+)?(?![\d%]))?)+\s*")]
     private static partial Regex Quantities();
 }
