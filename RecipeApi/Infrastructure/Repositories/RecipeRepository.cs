@@ -7,7 +7,7 @@ using RecipeApi.Infrastructure.Persistence;
 
 namespace RecipeApi.Infrastructure.Repositories;
 
-public class RecipeRepository(RecipeDbContext context) : IRecipeRepository
+public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer normalizer) : IRecipeRepository
 {
     /// <summary>
     /// Hoisted into a field rather than written as a method call inside Select.
@@ -119,6 +119,238 @@ public class RecipeRepository(RecipeDbContext context) : IRecipeRepository
                 r.Tags.Select(rt => rt.Tag.Name).ToList()))
             .FirstOrDefaultAsync(ct);
     }
+
+    public async Task<Guid> CreateAsync(
+        CreateRecipeRequest request,
+        Guid createdByUserId,
+        RecipeSourceType sourceType,
+        string? sourceUrl,
+        CancellationToken ct)
+    {
+        var recipe = new Recipe
+        {
+            Title = request.Title.Trim(),
+            Description = request.Description?.Trim(),
+            PrepTimeMinutes = request.PrepTimeMinutes,
+            CookTimeMinutes = request.CookTimeMinutes,
+            Servings = request.Servings,
+            Difficulty = request.Difficulty,
+            ImageUrl = request.ImageUrl?.Trim(),
+            SourceType = sourceType,
+            SourceUrl = sourceUrl,
+            CreatedByUserId = createdByUserId,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        await PopulateChildrenAsync(recipe, request, ct);
+
+        context.Recipes.Add(recipe);
+        await context.SaveChangesAsync(ct);
+
+        return recipe.Id;
+    }
+
+    public async Task<WriteResult> UpdateAsync(
+        Guid id, CreateRecipeRequest request, Guid currentUserId, CancellationToken ct)
+    {
+        var recipe = await context.Recipes
+            .Include(r => r.Ingredients)
+            .Include(r => r.Steps)
+            .Include(r => r.Cuisines)
+            .Include(r => r.Tags)
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
+
+        if (recipe is null)
+            return WriteResult.NotFound;
+
+        if (!CanModify(recipe, currentUserId))
+            return WriteResult.Forbidden;
+
+        recipe.Title = request.Title.Trim();
+        recipe.Description = request.Description?.Trim();
+        recipe.PrepTimeMinutes = request.PrepTimeMinutes;
+        recipe.CookTimeMinutes = request.CookTimeMinutes;
+        recipe.Servings = request.Servings;
+        recipe.Difficulty = request.Difficulty;
+        recipe.ImageUrl = request.ImageUrl?.Trim();
+        recipe.UpdatedAt = DateTimeOffset.UtcNow;
+
+        // Children are replaced wholesale rather than diffed. Every child is
+        // owned by exactly one recipe and carries no identity a client refers to,
+        // so a diff would buy nothing but a chance to get it wrong. Clearing a
+        // required relationship marks the orphans deleted.
+        recipe.Ingredients.Clear();
+        recipe.Steps.Clear();
+        recipe.Cuisines.Clear();
+        recipe.Tags.Clear();
+
+        await PopulateChildrenAsync(recipe, request, ct);
+        await context.SaveChangesAsync(ct);
+
+        return WriteResult.Success;
+    }
+
+    public async Task<WriteResult> DeleteAsync(Guid id, Guid currentUserId, CancellationToken ct)
+    {
+        var recipe = await context.Recipes.FirstOrDefaultAsync(r => r.Id == id, ct);
+
+        if (recipe is null)
+            return WriteResult.NotFound;
+
+        if (!CanModify(recipe, currentUserId))
+            return WriteResult.Forbidden;
+
+        // Ingredients, steps, cuisine and tag links go with it by DB cascade;
+        // the Ingredient/Cuisine/Tag rows themselves are shared and stay put.
+        context.Recipes.Remove(recipe);
+        await context.SaveChangesAsync(ct);
+
+        return WriteResult.Success;
+    }
+
+    /// <summary>
+    /// A null CreatedByUserId means scraped content, which belongs to nobody and
+    /// is therefore editable by nobody — not by the first person to claim it.
+    /// </summary>
+    private static bool CanModify(Recipe recipe, Guid currentUserId) =>
+        recipe.CreatedByUserId is Guid owner && owner == currentUserId;
+
+    private async Task PopulateChildrenAsync(Recipe recipe, CreateRecipeRequest request, CancellationToken ct)
+    {
+        // Normalize first, so the get-or-create lookup keys match what is stored.
+        var normalized = request.Ingredients
+            .Select(i => (Request: i, Name: normalizer.Normalize(i.Name)))
+            .Where(x => x.Name.Length > 0)
+            .ToList();
+
+        var ingredients = await ResolveIngredientsAsync(normalized.Select(x => x.Name), ct);
+
+        var order = 0;
+        foreach (var (item, name) in normalized)
+        {
+            recipe.Ingredients.Add(new RecipeIngredient
+            {
+                Ingredient = ingredients[name],
+                // Keep what the user actually typed; the normalized name is lossy
+                // by design and the original is what a reader wants to see.
+                RawText = string.IsNullOrWhiteSpace(item.RawText) ? item.Name.Trim() : item.RawText.Trim(),
+                Quantity = item.Quantity,
+                Unit = item.Unit?.Trim(),
+                Order = order++
+            });
+        }
+
+        var stepNumber = 1;
+        foreach (var instruction in request.Steps.Where(s => !string.IsNullOrWhiteSpace(s)))
+            recipe.Steps.Add(new RecipeStep { Order = stepNumber++, Instruction = instruction.Trim() });
+
+        foreach (var cuisine in await ResolveCuisinesAsync(request.Cuisines, ct))
+            recipe.Cuisines.Add(new RecipeCuisine { Cuisine = cuisine });
+
+        foreach (var tag in await ResolveTagsAsync(request.Tags, ct))
+            recipe.Tags.Add(new RecipeTag { Tag = tag });
+    }
+
+    // The three Resolve* methods below are the get-or-create the plan had no home
+    // for. It cannot live in an Application-layer mapper: turning "chicken breast"
+    // into *the existing* Ingredient row requires a database lookup.
+    //
+    // Concurrent creation of the same new name will violate the unique index on
+    // Name and fail the request. At this write volume that is rare enough to leave
+    // to the caller's retry; a race-proof version needs an upsert.
+    private async Task<Dictionary<string, Ingredient>> ResolveIngredientsAsync(
+        IEnumerable<string> names, CancellationToken ct)
+    {
+        var distinct = names.Distinct(StringComparer.Ordinal).ToList();
+
+        // Normalizer output is already lowercase, so an exact match is correct
+        // here and uses the unique B-tree index.
+        var resolved = await context.Ingredients
+            .Where(i => distinct.Contains(i.Name))
+            .ToDictionaryAsync(i => i.Name, ct);
+
+        foreach (var name in distinct.Where(n => !resolved.ContainsKey(n)))
+        {
+            var created = new Ingredient { Name = name };
+            context.Ingredients.Add(created);
+            resolved[name] = created;
+        }
+
+        return resolved;
+    }
+
+    private async Task<List<Cuisine>> ResolveCuisinesAsync(List<string>? names, CancellationToken ct)
+    {
+        var distinct = CleanNames(names);
+        if (distinct.Count == 0)
+            return [];
+
+        // Cuisine and tag names are user-facing display text, not normalizer
+        // output, so "italian" must find the existing "Italian" rather than
+        // creating a near-duplicate. Matching is case-insensitive; the casing the
+        // first writer used is what gets stored.
+        var lowered = distinct.Select(n => n.ToLowerInvariant()).ToList();
+
+        var existing = await context.Cuisines
+            .Where(c => lowered.Contains(c.Name.ToLower()))
+            .ToListAsync(ct);
+
+        var byLower = existing.ToDictionary(c => c.Name.ToLowerInvariant(), StringComparer.Ordinal);
+        var result = new List<Cuisine>();
+
+        foreach (var name in distinct)
+        {
+            var key = name.ToLowerInvariant();
+            if (!byLower.TryGetValue(key, out var cuisine))
+            {
+                cuisine = new Cuisine { Name = name };
+                context.Cuisines.Add(cuisine);
+                byLower[key] = cuisine;
+            }
+            result.Add(cuisine);
+        }
+
+        return result;
+    }
+
+    private async Task<List<Tag>> ResolveTagsAsync(List<string>? names, CancellationToken ct)
+    {
+        var distinct = CleanNames(names);
+        if (distinct.Count == 0)
+            return [];
+
+        var lowered = distinct.Select(n => n.ToLowerInvariant()).ToList();
+
+        var existing = await context.Tags
+            .Where(t => lowered.Contains(t.Name.ToLower()))
+            .ToListAsync(ct);
+
+        var byLower = existing.ToDictionary(t => t.Name.ToLowerInvariant(), StringComparer.Ordinal);
+        var result = new List<Tag>();
+
+        foreach (var name in distinct)
+        {
+            var key = name.ToLowerInvariant();
+            if (!byLower.TryGetValue(key, out var tag))
+            {
+                tag = new Tag { Name = name };
+                context.Tags.Add(tag);
+                byLower[key] = tag;
+            }
+            result.Add(tag);
+        }
+
+        return result;
+    }
+
+    private static List<string> CleanNames(List<string>? names) =>
+        names is null
+            ? []
+            : names
+                .Select(n => n.Trim())
+                .Where(n => n.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
     /// <summary>
     /// Every branch carries an Id tiebreaker. Without one, rows tying on the sort
