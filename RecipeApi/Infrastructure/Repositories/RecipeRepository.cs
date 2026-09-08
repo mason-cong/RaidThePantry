@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using RecipeApi.Application.Dtos;
 using RecipeApi.Application.Interfaces;
 using RecipeApi.Domain;
@@ -145,10 +146,36 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
         await PopulateChildrenAsync(recipe, request, ct);
 
         context.Recipes.Add(recipe);
-        await context.SaveChangesAsync(ct);
+
+        try
+        {
+            await context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (sourceUrl is not null && IsUniqueViolation(ex, "IX_Recipes_SourceUrl"))
+        {
+            // Translated here so the provider's exception type stays inside
+            // Infrastructure and the caller can decide what a duplicate means.
+            throw new DuplicateSourceUrlException(sourceUrl);
+        }
 
         return recipe.Id;
     }
+
+    public async Task<Guid?> FindIdBySourceUrlAsync(string sourceUrl, CancellationToken ct)
+    {
+        var match = await context.Recipes
+            .AsNoTracking()
+            .Where(r => r.SourceUrl == sourceUrl)
+            .Select(r => (Guid?)r.Id)
+            .FirstOrDefaultAsync(ct);
+
+        return match;
+    }
+
+    /// <summary>23505 is PostgreSQL's unique_violation.</summary>
+    private static bool IsUniqueViolation(DbUpdateException ex, string constraintName) =>
+        ex.InnerException is PostgresException { SqlState: "23505" } pg &&
+        (pg.ConstraintName?.Contains(constraintName, StringComparison.OrdinalIgnoreCase) ?? false);
 
     public async Task<WriteResult> UpdateAsync(
         Guid id, CreateRecipeRequest request, Guid currentUserId, CancellationToken ct)

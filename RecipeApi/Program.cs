@@ -1,10 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using RecipeApi.Application.Interfaces;
 using RecipeApi.Application.Services;
 using RecipeApi.Infrastructure.Auth;
 using RecipeApi.Infrastructure.Persistence;
 using RecipeApi.Infrastructure.Repositories;
+using RecipeApi.Infrastructure.Scraping;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +18,18 @@ builder.Services.AddScoped<ILookupRepository, LookupRepository>();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IIngredientNormalizer, IngredientNormalizer>();
 builder.Services.AddScoped<RecipeService>();
+builder.Services.AddScoped<RecipeImportService>();
+
+builder.Services.Configure<ScrapingOptions>(builder.Configuration.GetSection(ScrapingOptions.SectionName));
+builder.Services.AddHttpClient<IRecipeUrlImporter, RecipeUrlImporter>((sp, client) =>
+    {
+        var scraping = sp.GetRequiredService<IOptions<ScrapingOptions>>().Value;
+        client.Timeout = TimeSpan.FromSeconds(scraping.TimeoutSeconds);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(scraping.UserAgent);
+    })
+    // Redirects are followed by hand in RecipeUrlImporter so every hop is
+    // re-checked against the SSRF guard; automatic redirects would bypass it.
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 
 // Identity + JWT. Anonymous callers are unaffected: authentication only fills in
 // claims when a token is present, and authorization only bites on [Authorize].

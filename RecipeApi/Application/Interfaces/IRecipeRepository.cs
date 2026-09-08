@@ -36,6 +36,21 @@ public interface IRecipeRepository
     Task<WriteResult> UpdateAsync(Guid id, CreateRecipeRequest request, Guid currentUserId, CancellationToken ct);
 
     Task<WriteResult> DeleteAsync(Guid id, Guid currentUserId, CancellationToken ct);
+
+    Task<Guid?> FindIdBySourceUrlAsync(string sourceUrl, CancellationToken ct);
+}
+
+/// <summary>
+/// Raised when an insert loses the race to the unique index on Recipes.SourceUrl.
+/// A check-then-insert cannot close that window on its own, and letting the
+/// database arbitrate is better than pretending the check was atomic. Declared
+/// here so Infrastructure can translate the provider's error without the
+/// Application layer ever seeing an EF or Npgsql type.
+/// </summary>
+public class DuplicateSourceUrlException(string sourceUrl)
+    : Exception($"A recipe has already been imported from {sourceUrl}.")
+{
+    public string SourceUrl { get; } = sourceUrl;
 }
 
 public interface ILookupRepository
