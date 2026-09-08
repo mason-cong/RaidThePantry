@@ -15,6 +15,7 @@ builder.Services.AddDbContext<RecipeDbContext>(opt =>
 
 builder.Services.AddScoped<IRecipeRepository, RecipeRepository>();
 builder.Services.AddScoped<ILookupRepository, LookupRepository>();
+builder.Services.AddScoped<IFavoriteRepository, FavoriteRepository>();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IIngredientNormalizer, IngredientNormalizer>();
 builder.Services.AddScoped<RecipeService>();

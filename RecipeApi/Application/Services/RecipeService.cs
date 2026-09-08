@@ -6,19 +6,13 @@ namespace RecipeApi.Application.Services;
 
 public class RecipeService(IRecipeRepository repository)
 {
-    public const int MaxPageSize = 100;
-
-    public Task<PagedResult<RecipeSummaryDto>> SearchAsync(RecipeSearchQuery query, CancellationToken ct)
+    public Task<PagedResult<RecipeSummaryDto>> SearchAsync(
+        RecipeSearchQuery query, Guid? currentUserId, CancellationToken ct)
     {
-        // Page is clamped as well as PageSize: Page = 0 produces a negative Skip,
-        // which throws rather than returning an empty result.
-        var safe = query with
-        {
-            Page = Math.Max(query.Page, 1),
-            PageSize = Math.Clamp(query.PageSize, 1, MaxPageSize)
-        };
+        var (page, pageSize) = Paging.Normalize(query.Page, query.PageSize);
+        var safe = query with { Page = page, PageSize = pageSize };
 
-        return repository.SearchAsync(safe, ct);
+        return repository.SearchAsync(safe, currentUserId, ct);
     }
 
     public Task<RecipeDetailDto?> GetByIdAsync(Guid id, Guid? currentUserId, CancellationToken ct) =>

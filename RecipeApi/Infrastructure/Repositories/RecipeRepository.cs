@@ -1,6 +1,5 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using RecipeApi.Application.Dtos;
 using RecipeApi.Application.Interfaces;
 using RecipeApi.Domain;
@@ -14,17 +13,38 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
     /// Hoisted into a field rather than written as a method call inside Select.
     /// EF Core translates expression trees, and cannot see inside an arbitrary
     /// static method — `Select(r => Mapper.ToSummary(r))` fails to translate.
+    ///
+    /// Guests get IsFavorited as a constant rather than a subquery that can only
+    /// ever return false. Anonymous search is the common case; it should not pay
+    /// for a feature it cannot use.
     /// </summary>
-    private static readonly Expression<Func<Recipe, RecipeSummaryDto>> ToSummary =
+    private static readonly Expression<Func<Recipe, RecipeSummaryDto>> ToSummaryAnonymous =
         r => new RecipeSummaryDto(
             r.Id,
             r.Title,
             r.ImageUrl,
             r.PrepTimeMinutes + r.CookTimeMinutes,
             r.Difficulty,
-            r.Cuisines.Select(rc => rc.Cuisine.Name).ToList());
+            r.Cuisines.Select(rc => rc.Cuisine.Name).ToList(),
+            false);
 
-    public async Task<PagedResult<RecipeSummaryDto>> SearchAsync(RecipeSearchQuery query, CancellationToken ct)
+    /// <summary>
+    /// Built per call so the user id can be captured. Referencing the DbSet inside
+    /// the projection is translated as a correlated EXISTS, which is why this has
+    /// to be an instance method rather than a static field.
+    /// </summary>
+    private Expression<Func<Recipe, RecipeSummaryDto>> ToSummaryFor(Guid userId) =>
+        r => new RecipeSummaryDto(
+            r.Id,
+            r.Title,
+            r.ImageUrl,
+            r.PrepTimeMinutes + r.CookTimeMinutes,
+            r.Difficulty,
+            r.Cuisines.Select(rc => rc.Cuisine.Name).ToList(),
+            context.UserFavorites.Any(f => f.RecipeId == r.Id && f.UserId == userId));
+
+    public async Task<PagedResult<RecipeSummaryDto>> SearchAsync(
+        RecipeSearchQuery query, Guid? currentUserId, CancellationToken ct)
     {
         var q = context.Recipes.AsNoTracking();
 
@@ -83,7 +103,7 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
         var items = await ApplySort(q, query.SortBy)
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
-            .Select(ToSummary)
+            .Select(currentUserId is Guid userId ? ToSummaryFor(userId) : ToSummaryAnonymous)
             .ToListAsync(ct);
 
         return new PagedResult<RecipeSummaryDto>(items, totalCount, query.Page, query.PageSize);
@@ -110,6 +130,7 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
                 r.SourceUrl,
                 r.SourceType,
                 r.CreatedByUserId.HasValue && r.CreatedByUserId.Value == ownerProbe,
+                context.UserFavorites.Any(f => f.RecipeId == r.Id && f.UserId == ownerProbe),
                 r.Ingredients
                     .OrderBy(ri => ri.Order)
                     .Select(ri => new RecipeIngredientDto(
@@ -151,7 +172,8 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
         {
             await context.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex) when (sourceUrl is not null && IsUniqueViolation(ex, "IX_Recipes_SourceUrl"))
+        catch (DbUpdateException ex) when (sourceUrl is not null &&
+                                           PostgresErrors.IsUniqueViolation(ex, "IX_Recipes_SourceUrl"))
         {
             // Translated here so the provider's exception type stays inside
             // Infrastructure and the caller can decide what a duplicate means.
@@ -172,10 +194,6 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
         return match;
     }
 
-    /// <summary>23505 is PostgreSQL's unique_violation.</summary>
-    private static bool IsUniqueViolation(DbUpdateException ex, string constraintName) =>
-        ex.InnerException is PostgresException { SqlState: "23505" } pg &&
-        (pg.ConstraintName?.Contains(constraintName, StringComparison.OrdinalIgnoreCase) ?? false);
 
     public async Task<WriteResult> UpdateAsync(
         Guid id, CreateRecipeRequest request, Guid currentUserId, CancellationToken ct)

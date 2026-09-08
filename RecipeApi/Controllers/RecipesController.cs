@@ -16,7 +16,7 @@ public class RecipesController(RecipeService recipeService, ICurrentUserService 
     public async Task<ActionResult<PagedResult<RecipeSummaryDto>>> Search(
         [FromQuery] RecipeSearchRequestParams request, CancellationToken ct)
     {
-        var result = await recipeService.SearchAsync(request.ToSearchQuery(), ct);
+        var result = await recipeService.SearchAsync(request.ToSearchQuery(), currentUser.UserId, ct);
         return Ok(result);
     }
 

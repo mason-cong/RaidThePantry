@@ -98,6 +98,24 @@ That flag must stay false anywhere reachable. The fixture server also serves the
 failure cases — redirect-to-metadata, oversized pages, non-HTML responses, and
 pages with malformed or absent JSON-LD.
 
+## Favorites
+
+`GET/POST/DELETE /api/favorites` is the only wholly auth-gated controller.
+`POST /api/favorites/{recipeId}` saves, `DELETE` unsaves, and the list comes
+back most recently saved first.
+
+Both writes are idempotent: saving something already saved is 204 rather than a
+conflict, and unsaving something that was never saved is 204 rather than a 404.
+The caller asked for a state, and in both cases that state holds afterwards.
+Only an unknown recipe id is a 404.
+
+`RecipeSummaryDto` and `RecipeDetailDto` both carry `isFavorited`, so a list
+view can draw its own heart state without a round trip per card. It is always
+false for anonymous callers, and search skips the subquery entirely in that
+case rather than running one that can only return false.
+
+Deleting a recipe removes it from everyone's favorites by database cascade.
+
 ## Bulk scraping (RecipeApi.Worker)
 
 Two commands, deliberately separate, because fetching is the expensive

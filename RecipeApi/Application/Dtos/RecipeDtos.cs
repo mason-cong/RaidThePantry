@@ -8,7 +8,10 @@ public record RecipeSummaryDto(
     string? ImageUrl,
     int TotalTimeMinutes,
     DifficultyLevel Difficulty,
-    IReadOnlyList<string> Cuisines);
+    IReadOnlyList<string> Cuisines,
+    // Always false for anonymous callers. Lets a list view draw its own
+    // favorite state without a second round trip per card.
+    bool IsFavorited);
 
 public record RecipeIngredientDto(
     string Name,
@@ -31,6 +34,7 @@ public record RecipeDetailDto(
     // owner and are editable by nobody, so this lets the frontend hide controls
     // without reimplementing the ownership rule.
     bool IsEditable,
+    bool IsFavorited,
     IReadOnlyList<RecipeIngredientDto> Ingredients,
     IReadOnlyList<string> Steps,
     IReadOnlyList<string> Cuisines,

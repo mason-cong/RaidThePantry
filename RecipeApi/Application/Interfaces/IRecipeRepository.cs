@@ -16,7 +16,9 @@ public enum WriteResult
 
 public interface IRecipeRepository
 {
-    Task<PagedResult<RecipeSummaryDto>> SearchAsync(RecipeSearchQuery query, CancellationToken ct);
+    /// <param name="currentUserId">Null for guests; drives RecipeSummaryDto.IsFavorited.</param>
+    Task<PagedResult<RecipeSummaryDto>> SearchAsync(
+        RecipeSearchQuery query, Guid? currentUserId, CancellationToken ct);
 
     /// <param name="currentUserId">Null for guests; drives RecipeDetailDto.IsEditable.</param>
     Task<RecipeDetailDto?> GetByIdAsync(Guid id, Guid? currentUserId, CancellationToken ct);
