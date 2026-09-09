@@ -6,6 +6,7 @@ anonymous; an account is only needed to contribute recipes or save favorites.
 
 - `RecipeApi/` — ASP.NET Core Web API (.NET 10, controllers, EF Core, Postgres)
 - `RecipeApi.Worker/` — console host for the bulk `scrape` and `promote` commands
+- `web/` — React frontend (Vite, TypeScript, Tailwind CSS v4)
 
 ## Local setup
 
@@ -49,6 +50,68 @@ dotnet run --project RecipeApi --launch-profile http
 - API: http://localhost:5282
 - Swagger: http://localhost:5282/swagger
 - Health: http://localhost:5282/health → `{"status":"ok","database":"connected"}`
+
+## Frontend (`web/`)
+
+React 19 + TypeScript + Tailwind v4, built with Vite. State is plain React —
+`useState` and `useEffect` behind two hooks in `src/hooks/useApi.ts` — with no
+data-fetching library. At this size a query cache would be more machinery than
+the problem needs.
+
+```bash
+cd web
+npm install
+npm run build && npm run preview     # http://localhost:4173
+```
+
+**Read this before running `npm run dev`.** The dev server does not work from
+this checkout's path. Vite converts file paths to URLs, and the `#` in the
+parent `C#` directory is read as the start of a URL fragment, so module
+resolution truncates to `.../C` and every import fails. Vite prints a warning
+about it at startup, then serves `main.tsx` untransformed — the page loads and
+does nothing, with the real error only in the terminal.
+
+`npm run build` is unaffected, so `npm run preview` runs the app correctly
+against the same API proxy. The tradeoff is no hot reload: each change needs a
+rebuild. The only actual fix is a checkout path with no `#` in it — renaming the
+`C#` folder to `CSharp` restores `npm run dev` — which is a change to your
+folder layout, so it is left as your call rather than made here.
+
+Either server proxies `/api` to `http://localhost:5282`, so the browser sees one
+origin and CORS never comes up in development. That is a convenience of the dev
+proxy, not a substitute for the API's CORS policy, which still has to be right
+in production where the two are served separately.
+
+What is where:
+
+| Path | What it holds |
+|---|---|
+| `src/api/types.ts` | hand-written mirrors of the C# DTOs — the wire contract |
+| `src/api/client.ts` | the only code that calls `fetch`; token handling and `ApiError` |
+| `src/hooks/useApi.ts` | `useApi` (load and hold), `useAction` (submit), `useDebounced` |
+| `src/auth/` | the signed-in account; token in `localStorage` |
+| `src/pages/` | one file per screen |
+
+Two decisions worth knowing:
+
+**Search filters live in the URL, not in component state.** That is what makes a
+filtered search linkable and the back button work; `useState` looks simpler
+until someone shares a search and the recipient gets the unfiltered list.
+
+**The token is kept in `localStorage`.** It survives a reload, and anything that
+can run script on this origin can read it. That is the right trade here — there
+is no refresh token, so in-memory storage would mean signing in again on every
+reload — but it is a trade, and it is why the app must never render unsanitised
+HTML from a recipe.
+
+`isEditable` and `isFavorited` come from the server on every recipe DTO, so the
+frontend never reimplements the ownership rule and a list draws its own hearts
+without a request per card.
+
+Enums cross the wire as names — `"difficulty": "Easy"`, not `0`. The
+`JsonStringEnumConverter` in `Program.cs` and the matching one in the test
+suite's `Api.Json` have to agree; change one and every response carrying a
+`Difficulty` stops deserializing in the tests.
 
 ## Tests
 

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using RecipeApi.Application.Dtos;
 using RecipeApi.Domain;
 
@@ -13,8 +14,15 @@ namespace RecipeApi.IntegrationTests.Fixtures;
 /// </summary>
 internal static class Api
 {
-    /// <summary>camelCase and case-insensitive, matching the API's serializer.</summary>
-    public static readonly JsonSerializerOptions Json = new(JsonSerializerOptions.Web);
+    /// <summary>
+    /// camelCase, case-insensitive, and string enums — matching the API's
+    /// serializer. The converter is not optional: the API emits "Easy", and
+    /// without it every response carrying a Difficulty fails to deserialize.
+    /// </summary>
+    public static readonly JsonSerializerOptions Json = new(JsonSerializerOptions.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
 
     public static Task<HttpResponseMessage> SendAsync(
         this HttpClient client, HttpMethod method, string url, object? body = null, string? token = null)

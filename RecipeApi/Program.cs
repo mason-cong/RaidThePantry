@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
@@ -39,7 +40,13 @@ builder.Services.AddScoped<IRecipeUrlImporter, RecipeUrlImporter>();
 builder.Services.AddRecipeAuth(builder.Configuration, builder.Environment);
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddControllers();
+
+builder.Services.AddControllers()
+    // Enums on the wire as names ("Easy"), not ordinals (0). A client that reads
+    // `"difficulty": 0` has to carry its own copy of the mapping, which silently
+    // means something different the day a value is inserted into the enum.
+    // Inbound binding already accepted both, so only responses change shape.
+    .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(o =>
 {

@@ -49,5 +49,11 @@ public abstract class ApiTestBase(ApiFixture fixture) : IAsyncLifetime
 
     public Task InitializeAsync() => Fixture.ResetAsync();
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    /// <summary>
+    /// Virtual, and returning Task, so a derived class can actually override it.
+    /// A derived `ValueTask DisposeAsync()` — the shape IAsyncDisposable wants —
+    /// does not match this signature, so it hides instead of overriding and
+    /// xunit's IAsyncLifetime path silently keeps calling this empty base.
+    /// </summary>
+    public virtual Task DisposeAsync() => Task.CompletedTask;
 }

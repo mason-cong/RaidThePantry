@@ -5,7 +5,7 @@ using RecipeApi.IntegrationTests.Fixtures;
 
 namespace RecipeApi.IntegrationTests;
 
-public class ImportTests(ApiFixture fixture) : ApiTestBase(fixture), IAsyncDisposable
+public class ImportTests(ApiFixture fixture) : ApiTestBase(fixture)
 {
     private FixtureSite? _site;
 
@@ -241,11 +241,9 @@ public class ImportTests(ApiFixture fixture) : ApiTestBase(fixture), IAsyncDispo
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
     }
 
-    public async ValueTask DisposeAsync()
+    public override async Task DisposeAsync()
     {
         if (_site is not null)
             await _site.DisposeAsync();
-
-        GC.SuppressFinalize(this);
     }
 }

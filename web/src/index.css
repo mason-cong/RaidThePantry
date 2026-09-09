@@ -1,0 +1,41 @@
+@import 'tailwindcss';
+
+/* Tailwind v4 takes its theme from CSS, not a JS config file. These become
+   real utilities: `bg-brand-500`, `text-ink-500`, and so on. */
+@theme {
+  --color-brand-50: #fff7ed;
+  --color-brand-100: #ffedd5;
+  --color-brand-200: #fed7aa;
+  --color-brand-300: #fdba74;
+  --color-brand-400: #fb923c;
+  --color-brand-500: #f97316;
+  --color-brand-600: #ea580c;
+  --color-brand-700: #c2410c;
+  --color-brand-900: #7c2d12;
+
+  --color-ink-50: #f8fafc;
+  --color-ink-100: #f1f5f9;
+  --color-ink-200: #e2e8f0;
+  --color-ink-300: #cbd5e1;
+  --color-ink-400: #94a3b8;
+  --color-ink-500: #64748b;
+  --color-ink-700: #334155;
+  --color-ink-900: #0f172a;
+
+  --font-display: 'Georgia', 'Times New Roman', serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-ink-50 text-ink-900 antialiased;
+}
+
+/* Every interactive element gets the same visible focus ring. Tailwind's reset
+   removes the browser default, and leaving it removed makes the site unusable
+   by keyboard. */
+:where(a, button, input, select, textarea):focus-visible {
+  @apply outline-2 outline-offset-2 outline-brand-500;
+}
