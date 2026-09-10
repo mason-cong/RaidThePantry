@@ -7,6 +7,7 @@ anonymous; an account is only needed to contribute recipes or save favorites.
 - `RecipeApi/` — ASP.NET Core Web API (.NET 10, controllers, EF Core, Postgres)
 - `RecipeApi.Worker/` — console host for the bulk `scrape` and `promote` commands
 - `web/` — React frontend (Vite, TypeScript, Tailwind CSS v4)
+- `Dockerfile` — builds both halves into one image; see [Production](#production)
 
 ## Local setup
 
@@ -78,9 +79,9 @@ rebuild. The only actual fix is a checkout path with no `#` in it — renaming t
 folder layout, so it is left as your call rather than made here.
 
 Either server proxies `/api` to `http://localhost:5282`, so the browser sees one
-origin and CORS never comes up in development. That is a convenience of the dev
-proxy, not a substitute for the API's CORS policy, which still has to be right
-in production where the two are served separately.
+origin and CORS never comes up. That holds in production too — the image serves
+the SPA from the API's own `wwwroot` — which is why CORS is off unless
+`Cors:AllowedOrigins` is explicitly set. See [Production](#production).
 
 What is where:
 
@@ -120,7 +121,7 @@ docker compose up -d          # the suite needs a live PostgreSQL
 dotnet test
 ```
 
-157 tests, about 30 seconds. They boot the real application in-process with
+168 tests, about 35 seconds. They boot the real application in-process with
 `WebApplicationFactory` and run against a real database — nothing is
 substituted for a fake. That is deliberate: the defects this suite exists to
 catch are EF translation failures, LIKE escaping, index behaviour, unique
@@ -144,11 +145,105 @@ What is covered:
 | `RecipeWriteTests` | creator-only ownership, 403 vs 404, ingredient normalization and reuse |
 | `FavoritesTests` | idempotent save/unsave, per-account isolation, cascade on recipe delete |
 | `ImportTests` | JSON-LD shapes, and the SSRF guard including redirect-to-metadata |
+| `RateLimiterTests` | that the limiter bites, sends `Retry-After`, and leaves reads alone |
+| `Unit/GuardedConnectTests` | the SSRF rule at the connect callback, independent of the pre-flight check |
 | `Unit/` | `IngredientNormalizer` and `IsoDurationParser` directly — fast and precise |
+
+`RateLimiterTests` boots its own host with a real (tiny) limit. The shared
+fixture runs with the limiter effectively disabled, because every other test
+registers an account from loopback — one rate-limit partition — and production
+limits would throttle the suite rather than the code.
 
 `ImportTests` starts a real HTTP server on loopback rather than stubbing
 `HttpClient`, because redirect following, the size ceiling and the per-hop host
 check are the parts worth testing.
+
+## Production
+
+One image serves both halves: the API hosts the built SPA out of `wwwroot`, so
+the browser sees a single origin. CORS never comes into play, and the frontend
+needs no API base URL — `fetch('/api/...')` is already correct.
+
+```bash
+export JWT_SIGNING_KEY="$(openssl rand -base64 32)"
+
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml run --rm api --migrate   # deploy step
+docker compose -f docker-compose.prod.yml up -d
+# http://localhost:8080
+```
+
+That compose file is a **local rehearsal**, not a production topology — it runs
+the real image with Production settings so the startup checks, headers and SPA
+hosting can be exercised before any of it reaches a server. A real deployment
+uses a managed database and takes its secrets from the platform.
+
+**Migrations are a deliberate step, not something that happens on boot.** The
+image's entrypoint never migrates; `--migrate` (like `--seed`) runs and exits.
+That way a failed migration cannot crash-loop the app, and two instances
+starting together cannot race each other.
+
+### Configuration
+
+Environment variables use `__` where the key has a `:`.
+
+| Variable | Required | Notes |
+|---|---|---|
+| `ConnectionStrings__Postgres` | yes | Startup fails without it |
+| `Jwt__SigningKey` | yes | 32+ bytes. Never in a settings file |
+| `Scraping__UserAgent` | yes | Startup fails while it still says `example.com` |
+| `Hosting__BehindReverseProxy` | if proxied | See below |
+| `Cors__AllowedOrigins__0` | only if split | Unset means CORS is off entirely |
+| `RateLimiting__AuthPerMinute` | no | Default 30, per address |
+| `RateLimiting__ImportPerMinute` | no | Default 10, per account |
+
+**The app refuses to start rather than starting wrong.** Outside Development it
+rejects a missing connection string, a missing or too-short signing key, the
+placeholder user-agent, and — the one that matters — `AllowLoopbackHosts` left
+on, which would re-open the import endpoint onto everything else on the host.
+Every one of those fails silently otherwise: the app comes up and serves traffic
+while being quietly insecure or quietly broken.
+
+**`Hosting__BehindReverseProxy` defaults to false and must be turned on
+deliberately.** With it on, `X-Forwarded-*` is trusted from anyone, which is
+correct behind a proxy that overwrites those headers and a way to spoof your
+address past the per-IP rate limits if nothing does. The failure mode of leaving
+it off when you should have turned it on is visible (wrong client IPs in logs);
+the failure mode of the reverse is silent, so the default is the safe one.
+
+TLS termination is the platform's job. There is deliberately no
+`UseHttpsRedirection` — at the app layer, behind a proxy, that is the classic way
+to build a redirect loop. HSTS is sent in Production regardless.
+
+### What is enforced
+
+**SSRF.** `GuardedConnect` resolves the host and opens the socket in one step,
+so the address that was vetted is the address that gets dialled. This is what
+closes DNS rebinding: `FetchableUrl`'s pre-flight check exists for the error
+message, and on its own it loses to a name that answers differently the second
+time it is resolved. Both share one copy of the address rules so they cannot
+drift apart.
+
+**Rate limits.** Import is capped per account, because each call spends an
+outbound request against somebody else's site. Auth is capped per address, which
+is the right tool against credential stuffing and the wrong one against someone
+guessing a single password — they can rotate addresses, which is what the
+10-character minimum is for. Reads are deliberately uncapped: browsing is the
+anonymous default path through this app, and limiting it would be a
+self-inflicted outage the first time a link got shared. A 429 carries
+`Retry-After` and a `problem+json` body.
+
+**Headers.** `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, and a CSP
+whose `script-src` has no `'unsafe-inline'` — that is the directive that matters
+here, because an XSS on this origin can read the auth token out of
+`localStorage`. `img-src` allows any https origin, because recipe images are
+hotlinked from wherever a recipe was imported from.
+
+**Caching.** `/assets/*` is fingerprinted by Vite and served `immutable`; the SPA
+shell is always `no-cache`, or a deploy leaves browsers running the previous
+bundle against the new API. The shell rule keys off the response content type
+rather than the path, because it goes out by three different routes and only one
+of them passes through `StaticFileOptions`.
 
 ## Accounts
 
@@ -182,9 +277,12 @@ every resolved address checked against loopback, private, link-local (including
 followed by hand so **each hop** is re-checked — automatic redirects would let a
 public URL bounce to an internal one after the check had already passed.
 
-Its known gap is DNS rebinding: the guard resolves a name to vet it, and the
-HTTP client resolves again to connect. Closing that needs the connection pinned
-to the vetted address, and is worth doing before this runs anywhere public.
+DNS rebinding is closed by `GuardedConnect`, the handler's connect callback: it
+resolves the host and opens the socket itself, so the address that was vetted is
+the address that gets dialled. `FetchableUrl` remains the pre-flight check — it
+exists to produce a good error message before anything is dialled — and on its
+own it would lose to a name that answers differently the second time it is
+resolved. Both apply the same `IsAddressAllowed` so they cannot drift.
 
 `Scraping:AllowLoopbackHosts` is **true** in `appsettings.Development.json` so
 the importer can be tested against `fixtures/fixture_server.py`:

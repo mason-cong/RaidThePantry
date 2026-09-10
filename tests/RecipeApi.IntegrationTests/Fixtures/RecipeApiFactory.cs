@@ -29,11 +29,18 @@ public class RecipeApiFactory : WebApplicationFactory<Program>
     private const string TestSigningKey = "dGVzdC1vbmx5LXNpZ25pbmcta2V5LTMyLWJ5dGVzKys=";
 
     private readonly string _adminConnectionString;
+    private readonly Dictionary<string, string?> _overrides;
 
     public string ConnectionString { get; }
 
-    public RecipeApiFactory()
+    /// <param name="overrides">
+    /// Applied after the defaults below, so a test can boot a host that differs
+    /// in one setting — used by RateLimiterTests to run against a real limit.
+    /// </param>
+    public RecipeApiFactory(Dictionary<string, string?>? overrides = null)
     {
+        _overrides = overrides ?? [];
+
         var baseConnectionString =
             Environment.GetEnvironmentVariable("RECIPEFINDER_TEST_POSTGRES")
             ?? "Host=localhost;Port=5433;Username=recipeapi;Password=localdev";
@@ -63,8 +70,20 @@ public class RecipeApiFactory : WebApplicationFactory<Program>
                 // The import tests need to reach a fixture site on loopback, which
                 // the SSRF guard blocks by default. Enabled only here.
                 ["Scraping:AllowLoopbackHosts"] = "true",
-                ["Scraping:PolitenessDelaySeconds"] = "0"
+                ["Scraping:PolitenessDelaySeconds"] = "0",
+
+                // Every test registers a fresh account, and they all arrive from
+                // loopback — one rate-limit partition. Production limits would
+                // throttle the suite itself, which says nothing about the code
+                // under test. RateLimiterTests boots its own host with real
+                // limits to prove the policy actually bites.
+                ["RateLimiting:AuthPerMinute"] = "100000",
+                ["RateLimiting:ImportPerMinute"] = "100000"
             }));
+
+        // Second source, so it wins over the defaults above.
+        if (_overrides.Count > 0)
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(_overrides));
     }
 
     /// <summary>Creates the database if absent, then applies migrations.</summary>

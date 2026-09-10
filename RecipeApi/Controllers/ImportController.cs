@@ -1,8 +1,10 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using RecipeApi.Application.Interfaces;
 using RecipeApi.Application.Services;
+using RecipeApi.Infrastructure.Hosting;
 
 namespace RecipeApi.Controllers;
 
@@ -19,7 +21,11 @@ public class ImportController(RecipeImportService importService, ICurrentUserSer
     /// </summary>
     [HttpPost("url")]
     [Authorize]
+    // Each call spends an outbound request against somebody else's site. Without
+    // a cap, one account can point this server at a target and hold it there.
+    [EnableRateLimiting(RateLimitPolicies.ImportPolicy)]
     [ProducesResponseType<Guid>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

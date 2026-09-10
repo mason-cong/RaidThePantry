@@ -1,0 +1,71 @@
+# A local rehearsal of a production deploy, not a production topology.
+#
+# It runs the real image with Production settings so the startup checks, the
+# security headers and the SPA hosting can all be exercised before any of it
+# reaches a server. A real deployment uses a managed database and takes its
+# secrets from the platform rather than from a compose file.
+#
+#   export JWT_SIGNING_KEY="$(openssl rand -base64 32)"
+#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml run --rm api --migrate
+#   docker compose -f docker-compose.prod.yml up -d
+#   # http://localhost:8080
+
+# Its own project, which is load-bearing rather than tidiness. Compose derives
+# the project name from the directory, so without this both files are the project
+# "recipefinder" — and since both define a service called "postgres", bringing
+# this one up *replaces* the development database container with this one. The
+# volumes differ so no data is lost, but the dev container disappears and the
+# test suite stops being able to connect.
+name: recipefinder-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: recipefinder-prod-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: recipefinder
+      POSTGRES_USER: recipeapi
+      # Local rehearsal only. A real deployment does not keep this in a file.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rehearsal-only}
+    volumes:
+      - recipe-prod-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recipeapi -d recipefinder"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: recipefinder-api
+    restart: unless-stopped
+    environment:
+      # Double underscore is the nesting separator for environment
+      # configuration: ConnectionStrings__Postgres binds ConnectionStrings:Postgres.
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=recipefinder;Username=recipeapi;Password=${POSTGRES_PASSWORD:-rehearsal-only}"
+
+      # ":?" fails the run with this message rather than starting on a key
+      # nobody chose. Outside Development a missing key is already fatal, but
+      # failing here says why in one line.
+      Jwt__SigningKey: "${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY, e.g. export JWT_SIGNING_KEY=\"$(openssl rand -base64 32)\"}"
+
+      # StartupChecks rejects the example.com default, so the crawler cannot go
+      # out anonymous.
+      Scraping__UserAgent: "RecipeFinderBot/1.0 (+http://localhost:8080/about)"
+
+      # Nothing is terminating TLS in front of this locally, so X-Forwarded-*
+      # must not be trusted — anyone could then spoof their address past the
+      # per-IP rate limits. Set true only behind a real proxy.
+      Hosting__BehindReverseProxy: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  recipe-prod-pgdata:

@@ -1,14 +1,20 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using RecipeApi.Application.Dtos;
 using RecipeApi.Application.Interfaces;
 using RecipeApi.Domain;
+using RecipeApi.Infrastructure.Hosting;
 
 namespace RecipeApi.Controllers;
 
 [ApiController]
 [Route("api/auth")]
+// Applies to register and login; GET /me opts back out below. Password guessing
+// is the thing being throttled, and it is throttled per address because an
+// attacker doing it has no account of their own.
+[EnableRateLimiting(RateLimitPolicies.AuthPolicy)]
 public class AuthController(
     UserManager<ApplicationUser> userManager,
     IJwtTokenService tokenService,
@@ -60,6 +66,10 @@ public class AuthController(
     /// <summary>The signed-in account. Lets a frontend check whether its token is still good.</summary>
     [HttpGet("me")]
     [Authorize]
+    // The frontend calls this on every load to check whether a stored token is
+    // still good. It is a cheap indexed read and it is not a guessing target, so
+    // the per-IP auth limit would only punish several people sharing an address.
+    [DisableRateLimiting]
     [ProducesResponseType<CurrentUserDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<CurrentUserDto>> Me()

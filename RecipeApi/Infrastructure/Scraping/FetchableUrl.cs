@@ -11,10 +11,15 @@ namespace RecipeApi.Infrastructure.Scraping;
 /// credentials, or at a service reachable only from inside the network, and read
 /// the result back through the error message or the imported recipe.
 ///
-/// Known gap: this resolves DNS to check the address, and the HTTP client
-/// resolves again when it connects. A name that changes answers between the two
-/// (DNS rebinding) defeats it. Closing that needs the connection pinned to the
-/// vetted address, which is worth doing before this runs anywhere public.
+/// This type is the pre-flight check, and it exists for the error message: it
+/// can say "that host is not reachable for import" before anything is dialled.
+/// It is NOT the enforcement point. On its own it loses to DNS rebinding, because
+/// the name it resolves to vet is resolved again by the HTTP client when it
+/// connects, and a hostile server can answer differently the second time.
+///
+/// <see cref="GuardedConnect"/> is the enforcement point: it resolves and
+/// connects in one step, so the address that is vetted is the address that is
+/// dialled. Both share <see cref="IsAddressAllowed"/> so the two can not drift.
 /// </summary>
 public static class FetchableUrl
 {
@@ -73,10 +78,15 @@ public static class FetchableUrl
 
         // Every resolved address must be acceptable. A host that answers with one
         // public and one private address is exactly the attack.
-        return addresses.Length > 0 && addresses.All(a => IsAllowed(a, allowLoopback));
+        return addresses.Length > 0 && addresses.All(a => IsAddressAllowed(a, allowLoopback));
     }
 
-    private static bool IsAllowed(IPAddress address, bool allowLoopback)
+    /// <summary>
+    /// The address rule itself. Public because <see cref="GuardedConnect"/> has
+    /// to apply exactly this test at connect time — a second, separately
+    /// maintained copy of these ranges is how a guard like this rots.
+    /// </summary>
+    public static bool IsAddressAllowed(IPAddress address, bool allowLoopback)
     {
         if (address.IsIPv4MappedToIPv6)
             address = address.MapToIPv4();
