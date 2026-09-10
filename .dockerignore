@@ -23,6 +23,7 @@ notes
 
 # Not needed to build or run the app.
 .git
+.github
 .gitignore
 .gitattributes
 .vs

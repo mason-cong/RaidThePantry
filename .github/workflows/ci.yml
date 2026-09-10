@@ -1,0 +1,214 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Credentials below are spelled out at each use rather than hoisted into a
+# workflow-level env block. The env context is not available everywhere a
+# service container is defined, and a silently-empty password there fails in a
+# way that looks like a database problem rather than a configuration typo.
+
+jobs:
+  backend:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: recipefinder
+          POSTGRES_USER: recipeapi
+          POSTGRES_PASSWORD: localdev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U recipeapi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Test
+        # No Database in the connection string: the factory appends its own
+        # (recipefinder_test) and derives an admin connection to "postgres" from
+        # the same base, which is how it creates that database on first run.
+        env:
+          RECIPEFINDER_TEST_POSTGRES: "Host=localhost;Port=5432;Username=recipeapi;Password=localdev"
+        run: dotnet test --logger "console;verbosity=normal"
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # npm ci fails outright if package-lock.json has drifted from
+      # package.json, which is the point — that drift is otherwise invisible
+      # until a clean checkout somewhere else.
+      - name: Install
+        working-directory: web
+        run: npm ci
+
+      # Runs tsc before vite, so this fails on a type error and not only on a
+      # bundling error. It also builds from a path with no "#" in it, unlike the
+      # working checkout — see the frontend section of the README.
+      - name: Build
+        working-directory: web
+        run: npm run build
+
+  image:
+    name: Image build and smoke test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: recipefinder
+          POSTGRES_USER: recipeapi
+          POSTGRES_PASSWORD: localdev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U recipeapi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # --network host, so the container shares the runner's network namespace
+      # and reaches the service container on its mapped port.
+      CONNECTION: "Host=localhost;Port=5432;Database=recipefinder;Username=recipeapi;Password=localdev"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Nothing else exercises the Dockerfile. It can rot silently — an npm
+      # dependency that will not install under `npm ci`, a project reference
+      # that does not resolve inside the build context, a base tag that moves —
+      # and without this the first sign of it is a failed deploy.
+      - name: Build image
+        run: docker build -t recipefinder:ci .
+
+      - name: Generate a signing key
+        run: echo "JWT_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+
+      - name: Apply migrations
+        run: |
+          docker run --rm --network host \
+            -e ConnectionStrings__Postgres="$CONNECTION" \
+            -e Jwt__SigningKey="$JWT_KEY" \
+            -e Scraping__UserAgent="RecipeFinderBot/ci (+https://github.com/${{ github.repository }})" \
+            recipefinder:ci --migrate
+
+      # The build proves the image assembles. This proves it runs: that the
+      # startup checks pass on a legitimate configuration, that the SPA actually
+      # landed in wwwroot, and that the API can reach a database.
+      - name: Start the container
+        run: |
+          docker run -d --name recipefinder-ci --network host \
+            -e ConnectionStrings__Postgres="$CONNECTION" \
+            -e Jwt__SigningKey="$JWT_KEY" \
+            -e Scraping__UserAgent="RecipeFinderBot/ci (+https://github.com/${{ github.repository }})" \
+            recipefinder:ci
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+              echo "up after ${attempt}s"; exit 0
+            fi
+            sleep 1
+          done
+
+          echo "::error::the container never became healthy"
+          docker logs recipefinder-ci
+          exit 1
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+
+          echo "health:"
+          curl -fsS http://localhost:8080/health
+
+          echo "API responds:"
+          curl -fsS "http://localhost:8080/api/recipes?pageSize=1" >/dev/null
+
+          # The SPA is only present if the Dockerfile's frontend stage ran and
+          # its output was copied to wwwroot. A 200 of type text/html here is
+          # what says so.
+          echo "SPA is served:"
+          curl -fsS -o /dev/null -w '  / -> %{http_code} %{content_type}\n' http://localhost:8080/
+
+          # A client-side route must fall back to the shell rather than 404.
+          curl -fsS -o /dev/null -w '  /favorites -> %{http_code}\n' http://localhost:8080/favorites
+
+          # ...but an unmatched API path must not, or a mistyped endpoint
+          # returns HTML with a 200 and the client parses it as a recipe.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/does-not-exist)
+          echo "  /api/does-not-exist -> $code"
+          test "$code" = "404"
+
+      # The startup checks are a security control, so their failing closed is
+      # worth asserting rather than assuming. AllowLoopbackHosts left on in
+      # Production would re-open the import endpoint onto everything else on the
+      # host, and this is the only thing that would catch a regression in that
+      # check — it cannot be tested through WebApplicationFactory, which forces
+      # the Development environment.
+      - name: Startup checks reject unsafe configuration
+        run: |
+          set -uo pipefail
+
+          assert_refuses() {
+            local label="$1"; shift
+            local output
+            # timeout, because the failure mode under test is the container
+            # starting successfully and then running forever.
+            output=$(timeout 30 docker run --rm --network host \
+              -e ConnectionStrings__Postgres="$CONNECTION" \
+              -e Jwt__SigningKey="$JWT_KEY" \
+              "$@" recipefinder:ci 2>&1 || true)
+
+            if echo "$output" | grep -q "Refusing to start"; then
+              echo "  $label -> correctly refused"
+            else
+              echo "::error::$label was accepted, but should have been refused"
+              echo "$output" | tail -20
+              exit 1
+            fi
+          }
+
+          assert_refuses "AllowLoopbackHosts=true" \
+            -e Scraping__UserAgent="RecipeFinderBot/ci (+https://github.com/${{ github.repository }})" \
+            -e Scraping__AllowLoopbackHosts=true
+
+          assert_refuses "default user-agent" \
+            -e Scraping__AllowLoopbackHosts=false
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs recipefinder-ci || true
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f recipefinder-ci || true

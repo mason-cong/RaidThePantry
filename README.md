@@ -246,7 +246,7 @@ Environment variables use `__` where the key has a `:`.
 |---|---|---|
 | `ConnectionStrings__Postgres` | yes | Startup fails without it |
 | `Jwt__SigningKey` | yes | 32+ bytes. Never in a settings file |
-| `Scraping__UserAgent` | yes | Startup fails while it still says `example.com` |
+| `Scraping__UserAgent` | yes | Startup fails while it's still the built-in default |
 | `Hosting__BehindReverseProxy` | if proxied | See below |
 | `Cors__AllowedOrigins__0` | only if split | Unset means CORS is off entirely |
 | `RateLimiting__AuthPerMinute` | no | Default 30, per address |

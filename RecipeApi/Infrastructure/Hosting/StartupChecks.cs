@@ -41,10 +41,17 @@ public static class StartupChecks
 
         // Left at the template default the crawler is anonymous, which is rude at
         // best and gets the address blocked at worst.
-        if (scraping.UserAgent.Contains("example.com", StringComparison.OrdinalIgnoreCase))
+        //
+        // Compared against the default exactly, not searched for "example.com".
+        // The substring version rejected every contact URL containing that
+        // string — including recipes.example.com, which is what the README tells
+        // you to use, so following the documentation produced an app that
+        // refused to boot.
+        if (string.IsNullOrWhiteSpace(scraping.UserAgent) ||
+            scraping.UserAgent == ScrapingOptions.DefaultUserAgent)
         {
             problems.Add(
-                "Scraping:UserAgent still points at example.com. Set a real contact URL so a " +
+                "Scraping:UserAgent is still the built-in default. Set a real contact URL so a " +
                 "site owner can reach you before they block you.");
         }
 

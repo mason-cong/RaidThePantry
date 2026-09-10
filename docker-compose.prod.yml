@@ -60,9 +60,11 @@ services:
       # failing here says why in one line.
       Jwt__SigningKey: "${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY, e.g. export JWT_SIGNING_KEY=\"$(openssl rand -base64 32)\"}"
 
-      # StartupChecks rejects the example.com default, so the crawler cannot go
-      # out anonymous. Uses the real domain once DOMAIN is set.
-      Scraping__UserAgent: "RecipeFinderBot/1.0 (+https://${DOMAIN:-example.com}/about)"
+      # StartupChecks rejects the built-in default, so the crawler cannot go out
+      # anonymous. No ":-" fallback: the caddy service below already fails the
+      # whole command when DOMAIN is unset, and a fallback here would only ever
+      # supply a value that is wrong anyway.
+      Scraping__UserAgent: "RecipeFinderBot/1.0 (+https://${DOMAIN}/about)"
 
       # Caddy is the terminator in this topology and sets X-Forwarded-For /
       # X-Forwarded-Proto on every request it proxies, so this must be true —

@@ -15,8 +15,16 @@ public class ScrapingOptions
     public int TimeoutSeconds { get; set; } = 15;
     public int MaxRedirects { get; set; } = 5;
 
+    /// <summary>
+    /// The placeholder. Named so StartupChecks can test for "still the default"
+    /// exactly, rather than sniffing for a substring like "example.com" — that
+    /// rejects any real contact URL which happens to contain it, the
+    /// documentation's own example domain included.
+    /// </summary>
+    public const string DefaultUserAgent = "RecipeFinderBot/0.1 (+https://example.com/bot)";
+
     /// <summary>Identifies the crawler honestly, with a contact route.</summary>
-    public string UserAgent { get; set; } = "RecipeFinderBot/0.1 (+https://example.com/bot)";
+    public string UserAgent { get; set; } = DefaultUserAgent;
 
     /// <summary>The name robots.txt groups are matched against.</summary>
     public string UserAgentToken { get; set; } = "RecipeFinderBot";
