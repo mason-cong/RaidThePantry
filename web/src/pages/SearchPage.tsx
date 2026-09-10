@@ -111,7 +111,7 @@ export function SearchPage() {
 
   return (
     <div>
-      <section className="mb-8 rounded-2xl bg-linear-to-br from-brand-500 to-brand-700 px-6 py-10 text-white shadow-sm">
+      <section className="hero-doodles mb-8 rounded-2xl bg-linear-to-br from-brand-500 to-brand-700 px-6 py-10 text-white shadow-sm">
         <h1 className="font-display text-3xl font-bold sm:text-4xl">What can you cook tonight?</h1>
         <p className="mt-2 max-w-xl text-brand-100">
           Search by name, or add the ingredients you already have and find recipes that use all of
@@ -128,7 +128,10 @@ export function SearchPage() {
             value={searchText}
             onChange={(event) => setSearchText(event.target.value)}
             placeholder="Search recipes…"
-            className="w-full max-w-xl rounded-xl border-0 px-4 py-3 text-ink-900 shadow-lg placeholder:text-ink-400 focus:outline-none"
+            // bg-white is doing the real work: with no background class at all
+            // the input was transparent, so the orange gradient showed straight
+            // through and only the shadow hinted there was a field there.
+            className="w-full max-w-xl rounded-xl border-0 bg-white px-4 py-3 text-ink-900 shadow-lg ring-1 ring-black/5 placeholder:text-ink-500 focus:outline-none"
           />
         </div>
       </section>

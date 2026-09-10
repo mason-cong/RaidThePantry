@@ -39,3 +39,44 @@ body {
 :where(a, button, input, select, textarea):focus-visible {
   @apply outline-2 outline-offset-2 outline-brand-500;
 }
+
+/* Sketched ingredients behind the hero banner.
+
+   The tile is painted by a pseudo-element rather than as a second background
+   layer on the section itself, so its opacity can be dimmed independently — a
+   second background-image would share the element's opacity with the gradient
+   and wash out the white headline along with it.
+
+   border-radius: inherit rather than overflow: hidden, so the tile is clipped
+   to the section's rounded corners without also clipping anything a child might
+   later want to overhang. */
+.hero-doodles {
+  position: relative;
+}
+
+.hero-doodles::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  /* Served from public/ and referenced absolutely, NOT imported from src/.
+     Vite resolves a relative url() against the filesystem, and this checkout
+     sits under a "C#" directory whose "#" truncates the path — the build fails
+     with ENOENT on "...VSCode Projects\C". An absolute public path is passed
+     through untouched, so it sidesteps that entirely. */
+  background-image: url('/ingredient-doodles.svg');
+  background-repeat: repeat;
+  /* Height is 260/400 of the width — off that ratio and the tile seam stops
+     lining up with the chilli drawn across it. */
+  background-size: 380px 247px;
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+/* The pseudo-element is positioned, so it would otherwise paint over the
+   in-flow heading and search box. */
+.hero-doodles > * {
+  position: relative;
+  z-index: 1;
+}
