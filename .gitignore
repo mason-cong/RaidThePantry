@@ -85,6 +85,13 @@ coverage*.info
 TestResults/
 
 # ---------------------------------------------------------------------------
+# TLS material for the Caddy-fronted production deploy
+# ---------------------------------------------------------------------------
+# The Cloudflare Origin CA certificate and key that docker-compose.prod.yml
+# mounts into Caddy. Placed on the server by hand; never belongs in the repo.
+certs/
+
+# ---------------------------------------------------------------------------
 # Scraper working files
 # ---------------------------------------------------------------------------
 # Crawl input lists and any dumped pages are local working data, often large,

@@ -165,23 +165,78 @@ the browser sees a single origin. CORS never comes into play, and the frontend
 needs no API base URL — `fetch('/api/...')` is already correct.
 
 ```bash
+export DOMAIN=recipes.example.com
 export JWT_SIGNING_KEY="$(openssl rand -base64 32)"
+mkdir -p certs   # a Cloudflare Origin CA cert goes here — see below
 
 docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml run --rm api --migrate   # deploy step
 docker compose -f docker-compose.prod.yml up -d
-# http://localhost:8080
+# https://<DOMAIN>, once DNS points at this host
 ```
 
 That compose file is a **local rehearsal**, not a production topology — it runs
-the real image with Production settings so the startup checks, headers and SPA
-hosting can be exercised before any of it reaches a server. A real deployment
-uses a managed database and takes its secrets from the platform.
+the real image with Production settings, plus Caddy in front doing what
+Cloudflare's origin connection expects, so the startup checks, headers, SPA
+hosting and TLS handshake can all be exercised before any of it reaches a
+server. A real deployment still wants a managed database in place of the
+`postgres` service here.
 
 **Migrations are a deliberate step, not something that happens on boot.** The
 image's entrypoint never migrates; `--migrate` (like `--seed`) runs and exits.
 That way a failed migration cannot crash-loop the app, and two instances
 starting together cannot race each other.
+
+### Deploying on a bare VM behind Cloudflare (OCI, or similar)
+
+This is the arrangement `docker-compose.prod.yml` and the root `Caddyfile`
+actually set up, and the one verified against the running containers below.
+
+```
+browser --TLS--> Cloudflare --TLS--> Caddy --plain HTTP--> api (loopback only)
+                                       |
+                                   Origin CA cert
+```
+
+**One hop, deliberately.** With no OCI Load Balancer in front of the VM, this
+is the only proxy the app sees, so `Hosting:BehindReverseProxy`'s default
+`ForwardLimit` of 1 is already correct — no extra configuration needed for a
+second hop. Adding an OCI Load Balancer later would change that.
+
+**What makes trusting a forwarded header safe at all.** `Hosting:BehindReverseProxy=true`
+trusts `X-Forwarded-For` from anyone who connects — that is only sound because
+the OCI Security List admits *only* Cloudflare's published IP ranges
+(`https://www.cloudflare.com/ips/`) on 80/443. Restrict SSH to your own address
+while you're in there. Without that lockdown, someone who finds the VM's IP
+could bypass Cloudflare entirely and forge the header the rate limiter reads.
+
+**TLS between Cloudflare and the VM.** Set Cloudflare's SSL/TLS mode to **Full
+(strict)** — Flexible means the Cloudflare-to-origin hop is plain HTTP even
+though the browser shows a padlock. Full (strict) needs the origin to present a
+certificate Cloudflare actually trusts, and a Cloudflare **Origin CA**
+certificate is the free, made-for-this-exact-purpose answer: generate one at
+*SSL/TLS → Origin Server → Create Certificate*, save the two halves as
+`certs/origin.pem` and `certs/origin.key` next to the Caddyfile (gitignored;
+they never belong in the image or the repo), and Caddy picks them up. Because
+Security Lists already restrict inbound traffic to Cloudflare's ranges, this
+certificate is by construction only ever presented to Cloudflare — a
+certificate meant for exactly one audience serving exactly that audience.
+
+**The api container publishes nothing to the public interface.** It binds
+`127.0.0.1:8080` — reachable for a health check over SSH, invisible from the
+internet — and Caddy reaches it over the compose network by service name.
+Caddy is the only container with a published port, and it is also the only
+thing the Security List admits traffic to.
+
+Verified locally by standing the full stack up with a throwaway self-signed
+certificate in place of a real Origin CA one: the api port confirmed bound to
+loopback only (not `0.0.0.0`), Caddy served the right certificate over 443 and
+proxied through to a working `/health`, plain HTTP on `:80` redirected to
+HTTPS, and — the one worth spelling out — a forged `X-Forwarded-For` sent
+straight at Caddy did **not** get a fresh rate-limit allowance. Caddy appends
+its own real peer address to whatever arrives, and `ForwardLimit=1` reads the
+last entry, so the app used Caddy's value rather than the forged one. An
+attacker rotating a fake header to dodge the auth limit does not work here.
 
 ### Configuration
 

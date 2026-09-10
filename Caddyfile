@@ -1,0 +1,29 @@
+# Terminates TLS for Cloudflare's "Full (strict)" mode using a Cloudflare
+# Origin CA certificate — trusted by Cloudflare and nobody else, which is
+# exactly right here: the OCI Security List admits only Cloudflare's published
+# IP ranges, so no other client ever presents to this certificate anyway.
+#
+# Generate one free of charge at Cloudflare: SSL/TLS -> Origin Server ->
+# Create Certificate. Save the two halves next to this file (both gitignored,
+# neither belongs in the image) before `docker compose up`:
+#   certs/origin.pem   (the certificate)
+#   certs/origin.key   (the private key)
+#
+# {$DOMAIN} is substituted from the DOMAIN environment variable at container
+# start — see docker-compose.prod.yml.
+
+{$DOMAIN} {
+	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+
+	# "api" resolves via Docker's internal DNS to the api service — the two
+	# containers share the compose network, so this never touches the public
+	# internet and the api container publishes no host port of its own.
+	reverse_proxy api:8080
+}
+
+# Cloudflare reaches this origin over 443 directly under "Full (strict)", but
+# if "Always Use HTTPS" is ever off at Cloudflare's edge a plain-HTTP request
+# can still arrive here. Redirect it rather than serve the app in the clear.
+:80 {
+	redir https://{$DOMAIN}{uri} permanent
+}

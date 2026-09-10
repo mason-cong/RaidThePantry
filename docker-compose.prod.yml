@@ -5,18 +5,25 @@
 # reaches a server. A real deployment uses a managed database and takes its
 # secrets from the platform rather than from a compose file.
 #
+#   export DOMAIN=recipes.example.com
 #   export JWT_SIGNING_KEY="$(openssl rand -base64 32)"
+#   mkdir -p certs   # then drop in a Cloudflare Origin CA cert — see Caddyfile
+#
 #   docker compose -f docker-compose.prod.yml build
 #   docker compose -f docker-compose.prod.yml run --rm api --migrate
 #   docker compose -f docker-compose.prod.yml up -d
-#   # http://localhost:8080
+#   # https://<DOMAIN>, once Cloudflare's DNS record points at this host
+#
+# On a bare OCI VM with no OCI Load Balancer in front, this is the whole
+# public-facing stack: Cloudflare terminates the browser's TLS connection,
+# reaches this host over one more hop, and Caddy terminates that hop using a
+# Cloudflare Origin CA certificate. One hop means the default ForwardLimit of
+# 1 is correct — see Program.cs — and it is also why the OCI Security List
+# must admit only Cloudflare's published IP ranges on 80/443: that is what
+# makes trusting X-Forwarded-* from "whoever connects" safe in the first
+# place. A direct request from anywhere else is refused before Caddy ever
+# sees it.
 
-# Its own project, which is load-bearing rather than tidiness. Compose derives
-# the project name from the directory, so without this both files are the project
-# "recipefinder" — and since both define a service called "postgres", bringing
-# this one up *replaces* the development database container with this one. The
-# volumes differ so no data is lost, but the dev container disappears and the
-# test suite stops being able to connect.
 name: recipefinder-prod
 
 services:
@@ -54,18 +61,42 @@ services:
       Jwt__SigningKey: "${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY, e.g. export JWT_SIGNING_KEY=\"$(openssl rand -base64 32)\"}"
 
       # StartupChecks rejects the example.com default, so the crawler cannot go
-      # out anonymous.
-      Scraping__UserAgent: "RecipeFinderBot/1.0 (+http://localhost:8080/about)"
+      # out anonymous. Uses the real domain once DOMAIN is set.
+      Scraping__UserAgent: "RecipeFinderBot/1.0 (+https://${DOMAIN:-example.com}/about)"
 
-      # Nothing is terminating TLS in front of this locally, so X-Forwarded-*
-      # must not be trusted — anyone could then spoof their address past the
-      # per-IP rate limits. Set true only behind a real proxy.
-      Hosting__BehindReverseProxy: "false"
+      # Caddy is the terminator in this topology and sets X-Forwarded-For /
+      # X-Forwarded-Proto on every request it proxies, so this must be true —
+      # false here would make every caller's rate-limit partition collapse
+      # into Caddy's own address instead of the real client.
+      Hosting__BehindReverseProxy: "true"
+    # Bound to loopback only, not published to the host's public interface.
+    # Caddy reaches this container over the internal compose network by
+    # service name; 127.0.0.1:8080 stays available for a health check run
+    # from inside the VM (curl over SSH) without opening it to the internet.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: recipefinder-caddy
+    restart: unless-stopped
+    environment:
+      DOMAIN: "${DOMAIN:?set DOMAIN, e.g. export DOMAIN=recipes.example.com}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The Origin CA cert and key, placed here by hand — see Caddyfile.
+      # Read-only: Caddy only ever needs to read them.
+      - ./certs:/etc/caddy/certs:ro
+      - caddy-data:/data
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+
 volumes:
   recipe-prod-pgdata:
+  caddy-data:
