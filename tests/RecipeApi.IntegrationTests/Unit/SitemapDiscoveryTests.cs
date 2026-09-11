@@ -62,7 +62,7 @@ public class SitemapDiscoveryTests : IAsyncLifetime
     public async Task Match_filters_to_the_pages_that_are_actually_recipes()
     {
         var result = await _discovery.DiscoverAsync(
-            Site, new DiscoveryRequest(Limit: 100, Match: "/recipe/"), default);
+            Site, new DiscoveryRequest(Limit: 100, Match: ["/recipe/"]), default);
 
         Assert.All(result.Urls, url => Assert.Contains("/recipe/", url));
         Assert.DoesNotContain(result.Urls, u => u.Contains("/article/"));
@@ -76,7 +76,7 @@ public class SitemapDiscoveryTests : IAsyncLifetime
     public async Task Stops_at_the_limit()
     {
         var result = await _discovery.DiscoverAsync(
-            Site, new DiscoveryRequest(Limit: 2, Match: "/recipe/"), default);
+            Site, new DiscoveryRequest(Limit: 2, Match: ["/recipe/"]), default);
 
         Assert.Equal(2, result.Urls.Count);
     }
@@ -94,7 +94,7 @@ public class SitemapDiscoveryTests : IAsyncLifetime
         // robots.txt was ever consulted — making the rejection counter read zero
         // for the wrong reason.
         var result = await _discovery.DiscoverAsync(
-            Site, new DiscoveryRequest(Limit: 100, Match: "recipe"), default);
+            Site, new DiscoveryRequest(Limit: 100, Match: ["recipe"]), default);
 
         Assert.DoesNotContain(result.Urls, u => u.Contains("/blocked/"));
         Assert.True(result.RejectedByRobots >= 1,

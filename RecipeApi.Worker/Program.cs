@@ -79,7 +79,20 @@ var valueFlags = new HashSet<string> { "--limit", "--match", "--out" };
 
 var flags = new HashSet<string>();
 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+// --match may be repeated, and every one has to hold. A single fragment is
+// often not selective enough to separate recipes from the listicles and video
+// pages that share their URL shape.
+var repeated = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 var operands = new List<string>();
+
+void Record(string key, string value)
+{
+    values[key] = value;
+    if (!repeated.TryGetValue(key, out var list))
+        repeated[key] = list = [];
+    list.Add(value);
+}
 
 var rest = args.Skip(1).ToList();
 for (var i = 0; i < rest.Count; i++)
@@ -97,7 +110,7 @@ for (var i = 0; i < rest.Count; i++)
     {
         var key = arg[..equals].ToLowerInvariant();
         flags.Add(key);
-        values[key] = arg[(equals + 1)..];
+        Record(key, arg[(equals + 1)..]);
         continue;
     }
 
@@ -105,7 +118,7 @@ for (var i = 0; i < rest.Count; i++)
     flags.Add(name);
 
     if (valueFlags.Contains(name) && i + 1 < rest.Count && !rest[i + 1].StartsWith("--"))
-        values[name] = rest[++i];
+        Record(name, rest[++i]);
 }
 
 using var scope = host.Services.CreateScope();
@@ -131,11 +144,11 @@ try
                 ? parsed
                 : 100;
 
-            var match = values.GetValueOrDefault("--match");
+            var match = repeated.GetValueOrDefault("--match");
             var output = values.GetValueOrDefault("--out");
 
             Console.WriteLine($"Reading sitemaps for {site.Host}" +
-                              (match is null ? "" : $", matching \"{match}\"") +
+                              (match is null ? "" : $", matching {string.Join(" and ", match.Select(m => $"\"{m}\""))}") +
                               (limit > 0 ? $", up to {limit} url(s)..." : ", with no cap..."));
 
             var job = scope.ServiceProvider.GetRequiredService<DiscoverJob>();

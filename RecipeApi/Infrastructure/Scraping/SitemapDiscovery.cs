@@ -10,11 +10,16 @@ public record DiscoveryRequest(
     int Limit = 100,
 
     /// <summary>
-    /// Case-insensitive substring the URL must contain, e.g. "/recipe/".
-    /// Substring rather than a regex because the useful filter is nearly always
-    /// a path prefix, and a wrong regex fails in ways that are hard to see.
+    /// Case-insensitive substrings the URL must contain — <em>all</em> of them.
+    ///
+    /// Substrings rather than a regex because the useful filter is nearly always
+    /// a path fragment, and a wrong regex fails in ways that are hard to see.
+    /// More than one because a single fragment is often not selective enough:
+    /// delish.com publishes recipes at "/cooking/recipe-ideas/…-recipe/" and
+    /// video pages with no recipe markup at "/videos/…-recipe/", so it takes
+    /// both "/recipe-ideas/" and "-recipe/" to pick out the real ones.
     /// </summary>
-    string? Match = null,
+    IReadOnlyList<string>? Match = null,
 
     /// <summary>Ceiling on sitemap documents fetched, so an index of indexes cannot run away.</summary>
     int MaxSitemaps = 25);
@@ -123,8 +128,8 @@ public class SitemapDiscovery(
                     !string.Equals(pageUri.Host, site.Host, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                if (request.Match is { Length: > 0 } match &&
-                    !loc.Contains(match, StringComparison.OrdinalIgnoreCase))
+                if (request.Match is { Count: > 0 } patterns &&
+                    !patterns.All(p => loc.Contains(p, StringComparison.OrdinalIgnoreCase)))
                     continue;
 
                 // The same rules the crawl itself will apply, enforced here too

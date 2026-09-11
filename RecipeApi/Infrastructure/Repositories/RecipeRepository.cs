@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
+using RecipeApi.Application.Services;
 using RecipeApi.Application.Dtos;
 using RecipeApi.Application.Interfaces;
 using RecipeApi.Domain;
@@ -374,7 +375,15 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
 
     private async Task<List<Cuisine>> ResolveCuisinesAsync(List<string>? names, CancellationToken ct)
     {
-        var distinct = CleanNames(names);
+        // Normalized before the lookup, not after. Scraped data calls the same
+        // cuisine "Italian", "Italian Cuisine" and "American (US) Cuisine", and
+        // case-insensitive matching alone still files those as separate rows —
+        // giving the filter list three ways to ask one question, each returning
+        // a different subset of the recipes.
+        var distinct = CleanNames(names?.Select(CuisineName.Normalize).ToList())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         if (distinct.Count == 0)
             return [];
 

@@ -99,6 +99,14 @@ Two decisions worth knowing:
 filtered search linkable and the back button work; `useState` looks simpler
 until someone shares a search and the recipient gets the unfiltered list.
 
+**The landing page is a prompt, not a listing.** With no query and no filters it
+makes no search request at all and shows a starting point instead. Listing
+everything was harmless at 18 recipes and stops being so the moment the crawler
+runs — paging through thousands nobody asked about is not browsing. Filtering
+and paging were always done in SQL, so the browser never received the whole
+catalogue; this is about what is worth putting in front of someone, not about
+where the work happens.
+
 **The token is kept in `localStorage`.** It survives a reload, and anything that
 can run script on this origin can read it. That is the right trade here — there
 is no refresh token, so in-memory storage would mean signing in again on every
@@ -121,7 +129,7 @@ docker compose up -d          # the suite needs a live PostgreSQL
 dotnet test
 ```
 
-216 tests, about 40 seconds. They boot the real application in-process with
+231 tests, about 40 seconds. They boot the real application in-process with
 `WebApplicationFactory` and run against a real database — nothing is
 substituted for a fake. That is deliberate: the defects this suite exists to
 catch are EF translation failures, LIKE escaping, index behaviour, unique
@@ -150,6 +158,7 @@ What is covered:
 | `PromoteJobTests` | staging → recipes, and that a re-promote updates in place instead of replacing |
 | `Unit/RobotsTxtTests` | the robots.txt rules — group precedence, longest match, wildcards, `$`, Crawl-delay |
 | `Unit/SitemapDiscoveryTests` | sitemap-index recursion, `--match`, the `--limit` cap, off-site and disallowed URLs |
+| `Unit/CuisineNameTests` | collapsing "American", "American Cuisine" and "American (US) Cuisine" into one |
 | `Unit/GuardedConnectTests` | the SSRF rule at the connect callback, independent of the pre-flight check |
 | `Unit/` | `IngredientNormalizer` and `IsoDurationParser` directly — fast and precise |
 

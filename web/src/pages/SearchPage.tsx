@@ -91,11 +91,40 @@ export function SearchPage() {
     pageSize: 12,
   }
 
+  // Has the visitor actually asked for anything?
+  //
+  // With a catalogue of a few dozen recipes, listing everything by default was
+  // harmless. It does not survive the bulk crawl: paging through thousands of
+  // recipes nobody asked about is not browsing, it is scrolling. So the landing
+  // state is a prompt, and results appear once there is a question to answer.
+  const hasCriteria =
+    queryText.length > 0 ||
+    filters.cuisines.length > 0 ||
+    filters.ingredients.length > 0 ||
+    filters.difficulty !== null ||
+    filters.maxTotalTimeMinutes !== null
+
   // The serialized query is the dependency: it changes exactly when the request
   // would differ. `user` is in there because isFavorited depends on who asks —
   // signing in has to re-run the search or every heart stays empty.
-  const key = JSON.stringify(query) + (user?.id ?? 'anon')
-  const results = useApi((signal) => searchRecipes(query, signal), [key])
+  const key = JSON.stringify(query) + (user?.id ?? 'anon') + hasCriteria
+
+  const results = useApi(
+    // No criteria, no request. Returning an empty page rather than fetching one
+    // keeps the landing view from costing a query per visitor.
+    (signal) =>
+      hasCriteria
+        ? searchRecipes(query, signal)
+        : Promise.resolve({
+            items: [],
+            totalCount: 0,
+            page: 1,
+            pageSize: 12,
+            totalPages: 0,
+            hasNextPage: false,
+          }),
+    [key],
+  )
 
   // A local copy so a heart toggled on a card is not undone by the cached
   // response the next render reads from.
@@ -146,11 +175,13 @@ export function SearchPage() {
         <section>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-ink-500" aria-live="polite">
-              {results.loading
-                ? 'Searching…'
-                : results.data
-                  ? `${results.data.totalCount} recipe${results.data.totalCount === 1 ? '' : 's'}`
-                  : ''}
+              {!hasCriteria
+                ? ''
+                : results.loading
+                  ? 'Searching…'
+                  : results.data
+                    ? `${results.data.totalCount} recipe${results.data.totalCount === 1 ? '' : 's'}`
+                    : ''}
             </p>
 
             <label className="flex items-center gap-2 text-sm text-ink-500">
@@ -167,11 +198,17 @@ export function SearchPage() {
             </label>
           </div>
 
-          {results.error && <ErrorBanner message={results.error} onRetry={results.reload} />}
+          {!hasCriteria && <StartHere onPick={(term) => setSearchText(term)} />}
 
-          {results.loading && recipes.length === 0 && <Spinner label="Finding recipes" />}
+          {hasCriteria && results.error && (
+            <ErrorBanner message={results.error} onRetry={results.reload} />
+          )}
 
-          {!results.loading && !results.error && recipes.length === 0 && (
+          {hasCriteria && results.loading && recipes.length === 0 && (
+            <Spinner label="Finding recipes" />
+          )}
+
+          {hasCriteria && !results.loading && !results.error && recipes.length === 0 && (
             <EmptyState title="No recipes match those filters" icon="🔍">
               Try removing an ingredient, or widening the time limit.
             </EmptyState>
@@ -209,6 +246,54 @@ export function SearchPage() {
             </>
           )}
         </section>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The landing state, shown until the visitor has asked for something.
+ *
+ * Deliberately makes no request of its own. The filter sidebar beside it is
+ * already loading the cuisine list, which is a small aggregate rather than a
+ * page of recipes, and that is the only thing this view needs to be useful.
+ *
+ * The suggestions are plain search terms rather than links to specific recipes,
+ * so nothing here has to be kept in step with what the crawler happens to have
+ * collected.
+ */
+function StartHere({ onPick }: { onPick: (term: string) => void }) {
+  const suggestions = ['chicken', 'pasta', 'chocolate', 'soup', 'salad', 'garlic']
+
+  return (
+    <div className="rounded-xl border border-dashed border-ink-300 bg-white px-6 py-12 text-center">
+      <p className="text-4xl" aria-hidden="true">
+        🔎
+      </p>
+
+      <h2 className="mt-4 font-display text-xl font-semibold text-ink-900">
+        What are you looking for?
+      </h2>
+
+      <p className="mx-auto mt-2 max-w-md text-sm text-ink-500">
+        Search by name above, or use the filters to narrow by cuisine, difficulty and time —
+        or list the ingredients you already have and find recipes that use all of them.
+      </p>
+
+      <div className="mt-6">
+        <p className="text-xs font-medium tracking-wide text-ink-400 uppercase">Try</p>
+        <div className="mt-2 flex flex-wrap justify-center gap-2">
+          {suggestions.map((term) => (
+            <button
+              key={term}
+              type="button"
+              onClick={() => onPick(term)}
+              className="rounded-full bg-ink-100 px-3 py-1.5 text-sm font-medium text-ink-700 transition hover:bg-brand-100 hover:text-brand-700"
+            >
+              {term}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )
