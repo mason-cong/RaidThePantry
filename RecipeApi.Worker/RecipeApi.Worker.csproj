@@ -11,6 +11,29 @@
     <None Update="appsettings.Development.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('appsettings.Development.json')" />
   </ItemGroup>
 
+  <!--
+    Publishing this project drags RecipeApi's appsettings.json in through the
+    project reference, where it lands on the same relative path as this
+    project's own and fails the publish outright with NETSDK1152.
+
+    It went unnoticed for a long time because `dotnet build` and `dotnet run`
+    are both fine with it — only `publish` cares, and the Worker was never
+    published until it needed to go in the image.
+
+    The incoming copy holds nothing this project wants (ASP.NET logging
+    defaults and AllowedHosts), while this one holds the connection string and
+    the whole Scraping block. So the transitive one is dropped and the local
+    one wins, rather than leaving which file survives up to ordering.
+  -->
+  <Target Name="DropTransitiveApiAppSettings" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish
+        Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.RelativePath)' == 'appsettings.json'
+                   And !$([System.String]::Copy('%(ResolvedFileToPublish.Identity)').StartsWith('$(MSBuildProjectDirectory)'))" />
+    </ItemGroup>
+  </Target>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>

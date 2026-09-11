@@ -81,6 +81,44 @@ services:
       postgres:
         condition: service_healthy
 
+  # The bulk crawler. Same image as the api, different entry point.
+  #
+  # Under a profile so `up` never starts it: these are one-shot commands, not a
+  # long-running service, and a crawler that began fetching the moment the stack
+  # came up is not what anyone wants.
+  #
+  #   docker compose -f docker-compose.prod.yml run --rm worker scrape /crawl/urls.txt
+  #   docker compose -f docker-compose.prod.yml run --rm worker promote [--repromote]
+  #   docker compose -f docker-compose.prod.yml run --rm worker status
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["tools"]
+    # Its own subdirectory in the image — both projects ship an appsettings.json
+    # and cannot share a publish directory. See the Dockerfile.
+    entrypoint: ["dotnet", "worker/RecipeApi.Worker.dll"]
+    command: ["status"]
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=recipefinder;Username=recipeapi;Password=${POSTGRES_PASSWORD:-rehearsal-only}"
+      Scraping__UserAgent: "RecipeFinderBot/1.0 (+https://${DOMAIN}/about)"
+
+      # Never true here. The crawl reaches whatever the URL list names, and
+      # loopback from inside this container is the container itself.
+      Scraping__AllowLoopbackHosts: "false"
+
+      # Raise this and re-run `promote --repromote` to re-transform the staged
+      # corpus after a normalizer change — no re-crawl, and recipe ids survive.
+      Scraping__ParserVersion: "${PARSER_VERSION:-1}"
+    volumes:
+      # A directory rather than ./urls.txt directly: bind-mounting a file that
+      # does not exist yet makes Docker silently create a *directory* in its
+      # place, and the failure that follows points nowhere near the cause.
+      - ./crawl:/crawl:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   caddy:
     image: caddy:2-alpine
     container_name: recipefinder-caddy

@@ -32,22 +32,12 @@ builder.Services.AddHttpClient<PageFetcher>((sp, client) =>
         client.Timeout = TimeSpan.FromSeconds(scraping.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.ParseAdd(scraping.UserAgent);
     })
+    // Redirects are followed by hand in PageFetcher, and the connect callback is
+    // where the SSRF rule is enforced. See GuardedHttpHandler — the Worker builds
+    // its clients the same way, and that shared helper is the reason it now does.
     .ConfigurePrimaryHttpMessageHandler(sp =>
-    {
-        var scraping = sp.GetRequiredService<IOptions<ScrapingOptions>>().Value;
-
-        return new SocketsHttpHandler
-        {
-            // Redirects are followed by hand in PageFetcher so every hop is
-            // re-checked against the SSRF guard; automatic redirects would
-            // bypass it.
-            AllowAutoRedirect = false,
-
-            // The guard's enforcement point. Resolving and connecting in one
-            // step is what closes DNS rebinding — see GuardedConnect.
-            ConnectCallback = GuardedConnect.Handler(scraping.AllowLoopbackHosts)
-        };
-    });
+        GuardedHttpHandler.Create(
+            sp.GetRequiredService<IOptions<ScrapingOptions>>().Value.AllowLoopbackHosts));
 
 builder.Services.AddScoped<IRecipeUrlImporter, RecipeUrlImporter>();
 

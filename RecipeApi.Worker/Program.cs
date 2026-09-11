@@ -35,14 +35,26 @@ builder.Services.AddHttpClient<PageFetcher>((sp, client) =>
         client.Timeout = TimeSpan.FromSeconds(scraping.TimeoutSeconds);
         client.DefaultRequestHeaders.UserAgent.ParseAdd(scraping.UserAgent);
     })
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+    // Was a bare HttpClientHandler, which meant the bulk crawl — the thing that
+    // fetches the most URLs by far — had none of the SSRF protection the API's
+    // single-import endpoint got. Both now build the handler the same way.
+    .ConfigurePrimaryHttpMessageHandler(sp =>
+        GuardedHttpHandler.Create(
+            sp.GetRequiredService<IOptions<ScrapingOptions>>().Value.AllowLoopbackHosts));
 
 builder.Services.AddHttpClient<RobotsTxtChecker>((sp, client) =>
-{
-    var scraping = sp.GetRequiredService<IOptions<ScrapingOptions>>().Value;
-    client.Timeout = TimeSpan.FromSeconds(scraping.TimeoutSeconds);
-    client.DefaultRequestHeaders.UserAgent.ParseAdd(scraping.UserAgent);
-});
+    {
+        var scraping = sp.GetRequiredService<IOptions<ScrapingOptions>>().Value;
+        client.Timeout = TimeSpan.FromSeconds(scraping.TimeoutSeconds);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(scraping.UserAgent);
+    })
+    // robots.txt is fetched from a host the crawl list chose, so it needs the
+    // same guard. Redirects stay automatic here — RFC 9309 expects them to be
+    // followed — which is safe because the guard runs per connection.
+    .ConfigurePrimaryHttpMessageHandler(sp =>
+        GuardedHttpHandler.Create(
+            sp.GetRequiredService<IOptions<ScrapingOptions>>().Value.AllowLoopbackHosts,
+            followRedirects: true));
 
 builder.Services.AddScoped<IIngredientNormalizer, IngredientNormalizer>();
 builder.Services.AddScoped<IRecipeRepository, RecipeRepository>();

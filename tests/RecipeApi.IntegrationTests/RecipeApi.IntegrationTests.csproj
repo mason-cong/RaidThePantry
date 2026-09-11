@@ -21,6 +21,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\RecipeApi\RecipeApi.csproj" />
+    <!-- ScrapeJob and PromoteJob are plain injectable classes, so they are
+         driven directly rather than through the Worker's command line.
+
+         Behind an alias because both projects use top-level statements, and so
+         both generate a global `Program`. Without this, WebApplicationFactory
+         <Program> in RecipeApiFactory stops compiling with CS0433 — ambiguous
+         between the two assemblies. The alias hides the Worker's copy; files
+         that want the jobs opt in with `extern alias worker;`. -->
+    <ProjectReference Include="..\..\RecipeApi.Worker\RecipeApi.Worker.csproj"
+                      Aliases="worker" />
   </ItemGroup>
 
 </Project>

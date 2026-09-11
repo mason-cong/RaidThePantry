@@ -121,7 +121,7 @@ docker compose up -d          # the suite needs a live PostgreSQL
 dotnet test
 ```
 
-168 tests, about 35 seconds. They boot the real application in-process with
+200 tests, about 35 seconds. They boot the real application in-process with
 `WebApplicationFactory` and run against a real database — nothing is
 substituted for a fake. That is deliberate: the defects this suite exists to
 catch are EF translation failures, LIKE escaping, index behaviour, unique
@@ -146,6 +146,9 @@ What is covered:
 | `FavoritesTests` | idempotent save/unsave, per-account isolation, cascade on recipe delete |
 | `ImportTests` | JSON-LD shapes, and the SSRF guard including redirect-to-metadata |
 | `RateLimiterTests` | that the limiter bites, sends `Retry-After`, and leaves reads alone |
+| `ScrapeJobTests` | the crawl: robots.txt, what is stored per outcome, failures mid-batch, refetch |
+| `PromoteJobTests` | staging → recipes, and that a re-promote updates in place instead of replacing |
+| `Unit/RobotsTxtTests` | the robots.txt rules — group precedence, longest match, wildcards, `$`, Crawl-delay |
 | `Unit/GuardedConnectTests` | the SSRF rule at the connect callback, independent of the pre-flight check |
 | `Unit/` | `IngredientNormalizer` and `IsoDurationParser` directly — fast and precise |
 
@@ -279,6 +282,14 @@ message, and on its own it loses to a name that answers differently the second
 time it is resolved. Both share one copy of the address rules so they cannot
 drift apart.
 
+Every client that fetches a caller-supplied URL is built by
+`GuardedHttpHandler` — the API's importer, the Worker's page fetcher, and the
+Worker's robots.txt client. That helper exists because the alternative already
+failed: when the connect guard was first added, only the API was switched over,
+and the bulk crawler — which fetches far more URLs than the API ever will —
+quietly kept an unguarded handler. One shared constructor makes that particular
+mistake impossible rather than merely unlikely.
+
 **Rate limits.** Import is capped per account, because each call spends an
 outbound request against somebody else's site. Auth is capped per address, which
 is the right tool against credential stuffing and the wrong one against someone
@@ -379,6 +390,23 @@ dotnet run --project RecipeApi.Worker -- scrape urls.txt [--refetch]
 dotnet run --project RecipeApi.Worker -- promote [--repromote]
 dotnet run --project RecipeApi.Worker -- status
 ```
+
+In production the Worker ships inside the same image as the API, under its own
+entry point, and the compose file exposes it as a `worker` service. Put the URL
+list in `crawl/` — the directory is bind-mounted, rather than the file, because
+bind-mounting a file that does not exist yet makes Docker silently create a
+*directory* in its place:
+
+```bash
+mkdir -p crawl && cp urls.txt crawl/
+docker compose -f docker-compose.prod.yml run --rm worker scrape /crawl/urls.txt
+docker compose -f docker-compose.prod.yml run --rm worker promote
+docker compose -f docker-compose.prod.yml run --rm worker status
+```
+
+It sits behind a compose profile, so `up` never starts it: these are one-shot
+commands, and a crawler that began fetching the moment the stack came up is not
+what anyone wants.
 
 **`scrape`** fetches each URL into `staging.ScrapedPages` and never touches
 `Recipes`. It honors `robots.txt` — a named group for `RecipeFinderBot` beats

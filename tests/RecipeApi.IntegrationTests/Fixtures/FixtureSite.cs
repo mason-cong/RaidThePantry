@@ -84,6 +84,24 @@ public sealed class FixtureSite : IAsyncDisposable
 
         app.MapGet("/boom", () => Results.StatusCode(StatusCodes.Status500InternalServerError));
 
+        // For the Worker's crawl. The named group has to win over the wildcard,
+        // so the wildcard here is deliberately *more* permissive — if the
+        // checker were picking the wrong group, /blocked/ would be allowed and
+        // the test would notice.
+        app.MapGet("/robots.txt", () => Results.Content("""
+            User-agent: *
+            Disallow: /nothing-in-particular/
+
+            User-agent: RecipeFinderBot
+            Disallow: /blocked/
+            Crawl-delay: 0
+            """, "text/plain"));
+
+        // A perfectly good recipe that robots.txt puts off limits. Serving a
+        // real one matters: if this 404'd, a test asserting it was not staged
+        // would pass even with robots.txt handling removed entirely.
+        app.MapGet("/blocked/secret-recipe", () => Html(SimpleRecipe));
+
         // Comfortably past the 2MB ceiling.
         app.MapGet("/huge", () => HtmlWithPadding(
             string.Concat(Enumerable.Repeat("<p>padding padding padding</p>", 120_000)),
