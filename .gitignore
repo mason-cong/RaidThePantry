@@ -97,6 +97,7 @@ certs/
 # Crawl input lists and any dumped pages are local working data, often large,
 # and may carry third-party content that shouldn't be redistributed.
 urls.txt
+crawl/
 scrape-output/
 *.scrapelog
 

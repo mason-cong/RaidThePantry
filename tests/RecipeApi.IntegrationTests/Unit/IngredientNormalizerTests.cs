@@ -91,4 +91,54 @@ public class IngredientNormalizerTests
     [InlineData("70% dark chocolate")]
     public void Is_idempotent(string canonical) =>
         Assert.Equal(canonical, _normalizer.Normalize(canonical));
+
+    /// <summary>
+    /// Single-letter unit abbreviations, taken verbatim from a real delish.com
+    /// recipe. Before these were recognised, "4 c. cold heavy cream" normalized
+    /// to "c heavy cream" — an ingredient that would never match any other
+    /// recipe's "heavy cream", silently fragmenting the index the whole
+    /// normalizer exists to keep whole.
+    /// </summary>
+    [Theory]
+    [InlineData("4 c. cold heavy cream", "heavy cream")]
+    [InlineData("2/3 c. (75 g) confectioners' sugar", "confectioners sugar")]
+    // The same line as delish.com actually publishes it, with a curly apostrophe.
+    // It has to reach the same name as the straight-quoted form above, or one
+    // ingredient becomes two.
+    [InlineData("2/3 c. (75 g) confectioners’ sugar", "confectioners sugar")]
+    [InlineData("1 T. unsalted butter", "butter")]
+    [InlineData("2 t. vanilla extract", "vanilla extract")]
+    [InlineData("1 pt. heavy cream", "heavy cream")]
+    [InlineData("2 qt. chicken stock", "chicken stock")]
+    [InlineData("8 fl oz milk", "milk")]
+    public void Abbreviated_units_are_stripped(string raw, string expected) =>
+        Assert.Equal(expected, _normalizer.Normalize(raw));
+
+    /// <summary>
+    /// The counterpart: a unit abbreviation is only a unit at the front, so one
+    /// appearing inside a name survives. Leading units are stripped repeatedly
+    /// rather than once — "1 can gallon pickles" loses both "can" and "gallon" —
+    /// which is why the guard has to be about position, not about the word.
+    /// </summary>
+    [Theory]
+    [InlineData("vitamin c tablets", "vitamin c tablet")]
+    public void A_unit_word_inside_the_name_is_kept(string raw, string expected) =>
+        Assert.Equal(expected, _normalizer.Normalize(raw));
+
+    /// <summary>
+    /// The cost of treating "t" as teaspoon, pinned rather than papered over.
+    /// Leading units are stripped repeatedly, so "t" at the front of a name is
+    /// taken as a measurement — "t bone steak" loses its "t". That is the
+    /// accepted price of normalizing "t. salt", which is far more common, and
+    /// "T-bone" hyphenated (the usual spelling) is unaffected.
+    ///
+    /// If this ever stops being an acceptable trade, this test is the thing that
+    /// should change first.
+    /// </summary>
+    [Fact]
+    public void Known_limitation_a_leading_t_is_read_as_teaspoon()
+    {
+        Assert.Equal("bone steak", _normalizer.Normalize("2 lb t bone steak"));
+        Assert.Equal("t-bone steak", _normalizer.Normalize("2 lb t-bone steak"));
+    }
 }

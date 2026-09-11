@@ -5,7 +5,7 @@ recipes from external URLs; bulk-scrape into a staging table. Browsing is fully
 anonymous; an account is only needed to contribute recipes or save favorites.
 
 - `RecipeApi/` — ASP.NET Core Web API (.NET 10, controllers, EF Core, Postgres)
-- `RecipeApi.Worker/` — console host for the bulk `scrape` and `promote` commands
+- `RecipeApi.Worker/` — console host for the bulk `discover`, `scrape` and `promote` commands
 - `web/` — React frontend (Vite, TypeScript, Tailwind CSS v4)
 - `Dockerfile` — builds both halves into one image; see [Production](#production)
 
@@ -121,7 +121,7 @@ docker compose up -d          # the suite needs a live PostgreSQL
 dotnet test
 ```
 
-200 tests, about 35 seconds. They boot the real application in-process with
+216 tests, about 40 seconds. They boot the real application in-process with
 `WebApplicationFactory` and run against a real database — nothing is
 substituted for a fake. That is deliberate: the defects this suite exists to
 catch are EF translation failures, LIKE escaping, index behaviour, unique
@@ -149,6 +149,7 @@ What is covered:
 | `ScrapeJobTests` | the crawl: robots.txt, what is stored per outcome, failures mid-batch, refetch |
 | `PromoteJobTests` | staging → recipes, and that a re-promote updates in place instead of replacing |
 | `Unit/RobotsTxtTests` | the robots.txt rules — group precedence, longest match, wildcards, `$`, Crawl-delay |
+| `Unit/SitemapDiscoveryTests` | sitemap-index recursion, `--match`, the `--limit` cap, off-site and disallowed URLs |
 | `Unit/GuardedConnectTests` | the SSRF rule at the connect callback, independent of the pre-flight check |
 | `Unit/` | `IngredientNormalizer` and `IsoDurationParser` directly — fast and precise |
 
@@ -382,8 +383,26 @@ Deleting a recipe removes it from everyone's favorites by database cascade.
 
 ## Bulk scraping (RecipeApi.Worker)
 
-Two commands, deliberately separate, because fetching is the expensive
-rate-limited half and transforming is the cheap half that keeps changing.
+Three commands, deliberately separate, because finding pages, fetching them and
+transforming them fail differently and change at different rates. Each writes
+something the next one reads, and each can be re-run on its own.
+
+**`discover`** reads the site's own sitemaps — declared in robots.txt — and
+writes a list of candidate URLs. It never touches the database.
+
+```bash
+dotnet run --project RecipeApi.Worker -- \
+  discover https://www.example.com --match=/recipe/ --limit 50 --out crawl/urls.txt
+```
+
+Sitemaps rather than link-following: a sitemap is the publisher stating what it
+wants indexed, in a format meant for exactly this, and it avoids guessing which
+links on a page are recipes. `--limit` defaults to **100 and is the point** —
+real recipe sitemaps are enormous (allrecipes.com lists over 13,000 recipe URLs
+in one of its four child sitemaps), so an uncapped run would hand `scrape` days
+of requests against someone else's origin. `--limit 0` lifts the cap and has to
+be typed deliberately. URLs that robots.txt disallows are dropped here, before
+the crawl ever sees them.
 
 ```bash
 dotnet run --project RecipeApi.Worker -- scrape urls.txt [--refetch]
@@ -425,8 +444,39 @@ After changing the normalizer or mapper, raise `Scraping:ParserVersion` and run
 from the staged JSON — **no re-crawl**. Re-promotion updates each recipe in
 place rather than delete-and-recreate, so ids stay stable and favorites survive.
 
-Politeness is not permission: check a site's terms before pointing the crawler
-at it. To test against the fixture server instead:
+### What real sites actually do
+
+Tried against four large recipe sites, 5 URLs each. `discover` worked on all
+four. `scrape` did not:
+
+| Site | Result |
+|---|---|
+| delish.com | fetched fine; 2 of 5 were recipes, 3 were roundup pages |
+| allrecipes.com | **403** on every recipe page |
+| seriouseats.com | **403** |
+| simplyrecipes.com | **403** |
+
+The 403s are not robots.txt — the wildcard group permits those paths — and not
+the headers. `curl` fetches the identical URL with the identical User-Agent and
+Accept over the same HTTP version and gets 200, while .NET gets 403. That leaves
+the client fingerprint itself, which is bot management at the CDN. Getting past
+it would mean impersonating a browser's TLS signature, which is circumventing an
+access control the publisher deliberately put up, so this crawler does not and
+will not do it. Those three sites are simply not scrapable by this tool.
+
+Politeness is not permission, and neither is a permissive robots.txt: all four of
+those sites explicitly name and block AI and scraper bots elsewhere in the same
+file. Check a site's terms before pointing the crawler at it, and note that
+crawling and republishing are different questions — this app *serves* what it
+stores.
+
+Real pages also broke the normalizer in ways the fixtures never could: `4 c.
+cold heavy cream` normalized to `c heavy cream`, because the single-letter cup
+abbreviation was not in the units list, and `confectioners’ sugar` with a curly
+apostrophe produced a different canonical name than the straight-quoted form.
+Both are fixed, and both were found by running it rather than by reading it.
+
+To test against the fixture server instead:
 
 ```bash
 python fixtures/fixture_server.py 8099

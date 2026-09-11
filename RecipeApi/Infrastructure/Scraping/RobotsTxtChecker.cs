@@ -67,6 +67,10 @@ public partial class RobotsTxtChecker(
         var specific = new RobotsRules();
         var wildcard = new RobotsRules();
 
+        // Sitemap is a file-level directive, not part of any user-agent group,
+        // so it is gathered separately and attached to whichever group wins.
+        var sitemaps = new List<string>();
+
         var active = new List<RobotsRules>();
         var lastLineWasUserAgent = false;
 
@@ -119,12 +123,22 @@ public partial class RobotsTxtChecker(
                         foreach (var rules in active)
                             rules.CrawlDelay = TimeSpan.FromSeconds(Math.Clamp(seconds, 0, 60));
                     break;
+
+                case "sitemap":
+                    if (Uri.TryCreate(value, UriKind.Absolute, out var sitemap) &&
+                        (sitemap.Scheme == Uri.UriSchemeHttp || sitemap.Scheme == Uri.UriSchemeHttps))
+                    {
+                        sitemaps.Add(sitemap.ToString());
+                    }
+                    break;
             }
 
             lastLineWasUserAgent = false;
         }
 
-        return specific.HasRules ? specific : wildcard;
+        var winner = specific.HasRules ? specific : wildcard;
+        winner.Sitemaps = sitemaps;
+        return winner;
     }
 
     [GeneratedRegex(@"\*+")]
@@ -136,6 +150,14 @@ public class RobotsRules
     private readonly List<(Regex Pattern, int Length, bool Allow)> _rules = [];
 
     public TimeSpan? CrawlDelay { get; set; }
+
+    /// <summary>
+    /// Sitemap URLs the site declares. This is how <see cref="SitemapDiscovery"/>
+    /// finds recipe pages: the publisher listing what it wants indexed beats
+    /// guessing at URLs or spidering links out of a homepage.
+    /// </summary>
+    public IReadOnlyList<string> Sitemaps { get; set; } = [];
+
     public bool HasRules => _rules.Count > 0 || CrawlDelay is not null;
 
     public static RobotsRules AllowAll => new();

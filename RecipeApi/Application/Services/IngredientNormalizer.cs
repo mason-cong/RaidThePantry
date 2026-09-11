@@ -74,7 +74,11 @@ public partial class IngredientNormalizer : IIngredientNormalizer
 
     private static List<string> Tokenize(string segment) => segment
         .Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
-        .Select(t => t.Trim('.', ';', ':', '"', '\''))
+        // Curly quotes as well as straight ones. Real sites use both — delish.com
+        // writes "confectioners’ sugar" with U+2019 — and trimming only the ASCII
+        // form gives the same ingredient two canonical names depending on which
+        // character the publisher happened to type.
+        .Select(t => t.Trim('.', ';', ':', '"', '\'', '‘', '’', '“', '”'))
         .Where(t => t.Length > 0)
         .ToList();
 
@@ -102,6 +106,17 @@ public partial class IngredientNormalizer : IIngredientNormalizer
         "ml", "l", "litre", "litres", "liter", "liters",
         "oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds",
         "cup", "cups", "tbsp", "tablespoon", "tablespoons",
+        // Single-letter abbreviations, which American recipe sites use heavily:
+        // "4 c. cold heavy cream", "1 T. butter". Without "c" the unit survives
+        // into the canonical name and "c heavy cream" becomes its own ingredient,
+        // separate from every other recipe's "heavy cream".
+        //
+        // "t" is the one real trade: it rescues "t. salt" and costs "t bone
+        // steak", which is rare and normally hyphenated. Only leading tokens are
+        // stripped, so nothing is lost mid-name.
+        "c", "t",
+        "pt", "pint", "pints", "qt", "quart", "quarts", "gal", "gallon", "gallons",
+        "fl", "dozen", "doz",
         "tsp", "teaspoon", "teaspoons", "pinch", "pinches", "dash",
         "handful", "handfuls", "bunch", "bunches", "clove", "cloves",
         "slice", "slices", "sprig", "sprigs", "stick", "sticks",

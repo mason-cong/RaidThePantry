@@ -26,18 +26,15 @@ builder.Services.AddScoped<RecipeService>();
 builder.Services.AddScoped<RecipeImportService>();
 
 builder.Services.Configure<ScrapingOptions>(builder.Configuration.GetSection(ScrapingOptions.SectionName));
+// Same client configuration as the Worker's crawler, from one place. The import
+// endpoint fetches the same sites, so it needs the same headers — without them a
+// CDN answers 403 and the user is told the page could not be reached.
 builder.Services.AddHttpClient<PageFetcher>((sp, client) =>
-    {
-        var scraping = sp.GetRequiredService<IOptions<ScrapingOptions>>().Value;
-        client.Timeout = TimeSpan.FromSeconds(scraping.TimeoutSeconds);
-        client.DefaultRequestHeaders.UserAgent.ParseAdd(scraping.UserAgent);
-    })
+        ScrapingHttpDefaults.Apply(client, sp.GetRequiredService<IOptions<ScrapingOptions>>().Value))
     // Redirects are followed by hand in PageFetcher, and the connect callback is
-    // where the SSRF rule is enforced. See GuardedHttpHandler — the Worker builds
-    // its clients the same way, and that shared helper is the reason it now does.
+    // where the SSRF rule is enforced.
     .ConfigurePrimaryHttpMessageHandler(sp =>
-        GuardedHttpHandler.Create(
-            sp.GetRequiredService<IOptions<ScrapingOptions>>().Value.AllowLoopbackHosts));
+        ScrapingHttpDefaults.Handler(sp.GetRequiredService<IOptions<ScrapingOptions>>().Value));
 
 builder.Services.AddScoped<IRecipeUrlImporter, RecipeUrlImporter>();
 

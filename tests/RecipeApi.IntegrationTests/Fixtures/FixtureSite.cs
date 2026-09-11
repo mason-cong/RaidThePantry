@@ -88,7 +88,10 @@ public sealed class FixtureSite : IAsyncDisposable
         // so the wildcard here is deliberately *more* permissive — if the
         // checker were picking the wrong group, /blocked/ would be allowed and
         // the test would notice.
-        app.MapGet("/robots.txt", () => Results.Content("""
+        app.MapGet("/robots.txt", (HttpContext ctx) => Results.Content($"""
+            Sitemap: {Origin(ctx)}/sitemap.xml
+            Sitemap: https://elsewhere.invalid/sitemap.xml
+
             User-agent: *
             Disallow: /nothing-in-particular/
 
@@ -96,6 +99,26 @@ public sealed class FixtureSite : IAsyncDisposable
             Disallow: /blocked/
             Crawl-delay: 0
             """, "text/plain"));
+
+        // An index, so discovery has to recurse rather than read one document.
+        app.MapGet("/sitemap.xml", (HttpContext ctx) => Results.Content($"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <sitemap><loc>{Origin(ctx)}/sitemap_1.xml</loc></sitemap>
+            </sitemapindex>
+            """, "application/xml"));
+
+        app.MapGet("/sitemap_1.xml", (HttpContext ctx) => Results.Content($"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url><loc>{Origin(ctx)}/recipe/one</loc></url>
+              <url><loc>{Origin(ctx)}/recipe/two</loc></url>
+              <url><loc>{Origin(ctx)}/recipe/three</loc></url>
+              <url><loc>{Origin(ctx)}/article/not-a-recipe</loc></url>
+              <url><loc>{Origin(ctx)}/blocked/secret-recipe</loc></url>
+              <url><loc>https://elsewhere.invalid/recipe/off-site</loc></url>
+            </urlset>
+            """, "application/xml"));
 
         // A perfectly good recipe that robots.txt puts off limits. Serving a
         // real one matters: if this 404'd, a test asserting it was not staged
@@ -107,6 +130,10 @@ public sealed class FixtureSite : IAsyncDisposable
             string.Concat(Enumerable.Repeat("<p>padding padding padding</p>", 120_000)),
             SimpleRecipe));
     }
+
+    /// <summary>The port is chosen by the OS, so sitemap URLs have to be built at request time.</summary>
+    private static string Origin(HttpContext context) =>
+        $"{context.Request.Scheme}://{context.Request.Host}";
 
     private static IResult Html(params string[] jsonLdBlocks) =>
         HtmlWithPadding(string.Empty, jsonLdBlocks);
