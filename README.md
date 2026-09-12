@@ -129,7 +129,7 @@ docker compose up -d          # the suite needs a live PostgreSQL
 dotnet test
 ```
 
-231 tests, about 40 seconds. They boot the real application in-process with
+255 tests, about 50 seconds. They boot the real application in-process with
 `WebApplicationFactory` and run against a real database — nothing is
 substituted for a fake. That is deliberate: the defects this suite exists to
 catch are EF translation failures, LIKE escaping, index behaviour, unique
@@ -159,6 +159,7 @@ What is covered:
 | `Unit/RobotsTxtTests` | the robots.txt rules — group precedence, longest match, wildcards, `$`, Crawl-delay |
 | `Unit/SitemapDiscoveryTests` | sitemap-index recursion, `--match`, the `--limit` cap, off-site and disallowed URLs |
 | `Unit/CuisineNameTests` | collapsing "American", "American Cuisine" and "American (US) Cuisine" into one |
+| `Unit/TagNameTests` | dropping CMS metadata that publishers put in schema.org `keywords` |
 | `Unit/GuardedConnectTests` | the SSRF rule at the connect callback, independent of the pre-flight check |
 | `Unit/` | `IngredientNormalizer` and `IsoDurationParser` directly — fast and precise |
 

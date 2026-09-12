@@ -19,6 +19,11 @@ public class CuisineNameTests
     [InlineData("  French   Cuisine  ", "French")]
     // Case is preserved: these stay display text, unlike ingredient names.
     [InlineData("Thai", "Thai")]
+    // Hyphen variants have to collapse: delish.com puts both of these on the
+    // same recipe, which produced two rows for one thing.
+    [InlineData("Nut-Free Diet", "Nut Free Diet")]
+    [InlineData("Nut Free Diet", "Nut Free Diet")]
+    [InlineData("Tex-Mex", "Tex Mex")]
     public void Collapses_the_ways_a_cuisine_gets_written(string raw, string expected) =>
         Assert.Equal(expected, CuisineName.Normalize(raw));
 

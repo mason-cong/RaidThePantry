@@ -417,7 +417,15 @@ public class RecipeRepository(RecipeDbContext context, IIngredientNormalizer nor
 
     private async Task<List<Tag>> ResolveTagsAsync(List<string>? names, CancellationToken ct)
     {
-        var distinct = CleanNames(names);
+        // Filtered before the lookup. schema.org keywords are a free-text field
+        // publishers use for CMS metadata, and TagName drops anything shaped
+        // `key: value` — without it, half the tag table was things like
+        // "contentId: d05c0f11-…" being rendered to visitors as badges.
+        var distinct = CleanNames(
+                names?.Select(TagName.Normalize).Where(n => n is not null).Select(n => n!).ToList())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         if (distinct.Count == 0)
             return [];
 

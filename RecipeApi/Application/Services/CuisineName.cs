@@ -30,7 +30,12 @@ public static partial class CuisineName
         // called something ending in another word keeps it.
         cleaned = TrailingCuisineWord().Replace(cleaned, string.Empty);
 
-        cleaned = Whitespace().Replace(cleaned, " ").Trim(' ', ',', '-', '–');
+        // Hyphens become spaces, so "Nut-Free Diet" and "Nut Free Diet" — which
+        // delish.com publishes on the same recipe — reach one row instead of
+        // two. Also merges "Tex-Mex" with "Tex Mex".
+        cleaned = cleaned.Replace('-', ' ').Replace('–', ' ');
+
+        cleaned = Whitespace().Replace(cleaned, " ").Trim(' ', ',');
 
         // If stripping left nothing — a label that was only "Cuisine" — the
         // original is better than an empty string.
