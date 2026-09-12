@@ -89,7 +89,7 @@ TestResults/
 # ---------------------------------------------------------------------------
 # The Cloudflare Origin CA certificate and key that docker-compose.prod.yml
 # mounts into Caddy. Placed on the server by hand; never belongs in the repo.
-certs/
+certs/   # kept ignored: unused now, but harmless if you ever go back to a supplied cert
 
 # ---------------------------------------------------------------------------
 # Scraper working files

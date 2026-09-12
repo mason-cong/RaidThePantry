@@ -5,24 +5,23 @@
 # reaches a server. A real deployment uses a managed database and takes its
 # secrets from the platform rather than from a compose file.
 #
-#   export DOMAIN=recipes.example.com
+#   export DOMAIN=raidthepantry.ca
+#   export ACME_EMAIL=you@example.com
 #   export JWT_SIGNING_KEY="$(openssl rand -base64 32)"
-#   mkdir -p certs   # then drop in a Cloudflare Origin CA cert — see Caddyfile
 #
 #   docker compose -f docker-compose.prod.yml build
 #   docker compose -f docker-compose.prod.yml run --rm api --migrate
 #   docker compose -f docker-compose.prod.yml up -d
-#   # https://<DOMAIN>, once Cloudflare's DNS record points at this host
+#   # https://<DOMAIN>, once the DNS A record points at this host
 #
-# On a bare OCI VM with no OCI Load Balancer in front, this is the whole
-# public-facing stack: Cloudflare terminates the browser's TLS connection,
-# reaches this host over one more hop, and Caddy terminates that hop using a
-# Cloudflare Origin CA certificate. One hop means the default ForwardLimit of
-# 1 is correct — see Program.cs — and it is also why the OCI Security List
-# must admit only Cloudflare's published IP ranges on 80/443: that is what
-# makes trusting X-Forwarded-* from "whoever connects" safe in the first
-# place. A direct request from anywhere else is refused before Caddy ever
-# sees it.
+# On a bare OCI VM this is the whole public-facing stack: Caddy terminates TLS
+# with a certificate it obtains from Let's Encrypt itself, and proxies to the
+# api container over the internal network.
+#
+# Caddy is the only hop, so the default ForwardLimit of 1 is correct — see
+# Program.cs. It is also the only container with a published port: the api
+# binds 127.0.0.1 so it is reachable over SSH for a health check and from
+# nowhere else.
 
 name: recipefinder-prod
 
@@ -124,13 +123,18 @@ services:
     container_name: recipefinder-caddy
     restart: unless-stopped
     environment:
-      DOMAIN: "${DOMAIN:?set DOMAIN, e.g. export DOMAIN=recipes.example.com}"
+      DOMAIN: "${DOMAIN:?set DOMAIN, e.g. export DOMAIN=raidthepantry.ca}"
+      ACME_EMAIL: "${ACME_EMAIL:?set ACME_EMAIL so Let's Encrypt can warn you about expiry}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # The Origin CA cert and key, placed here by hand — see Caddyfile.
-      # Read-only: Caddy only ever needs to read them.
-      - ./certs:/etc/caddy/certs:ro
+
+      # Load-bearing, not incidental. This holds the ACME account key and every
+      # issued certificate. Lose it and Caddy re-requests from scratch; do that
+      # a few times in a week and Let's Encrypt's duplicate-certificate rate
+      # limit locks you out for days. `docker compose down` keeps it;
+      # `down -v` does not.
       - caddy-data:/data
+      - caddy-config:/config
     ports:
       - "80:80"
       - "443:443"
@@ -140,3 +144,4 @@ services:
 volumes:
   recipe-prod-pgdata:
   caddy-data:
+  caddy-config:

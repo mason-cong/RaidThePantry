@@ -1,29 +1,31 @@
-# Terminates TLS for Cloudflare's "Full (strict)" mode using a Cloudflare
-# Origin CA certificate — trusted by Cloudflare and nobody else, which is
-# exactly right here: the OCI Security List admits only Cloudflare's published
-# IP ranges, so no other client ever presents to this certificate anyway.
+# TLS is obtained and renewed automatically from Let's Encrypt.
 #
-# Generate one free of charge at Cloudflare: SSL/TLS -> Origin Server ->
-# Create Certificate. Save the two halves next to this file (both gitignored,
-# neither belongs in the image) before `docker compose up`:
-#   certs/origin.pem   (the certificate)
-#   certs/origin.key   (the private key)
+# There is deliberately no `tls` directive and no certificate on disk: Caddy
+# provisions one the first time the site is requested, then renews it on its own.
 #
-# {$DOMAIN} is substituted from the DOMAIN environment variable at container
-# start — see docker-compose.prod.yml.
+# Two things this depends on, both easy to get wrong:
+#
+#   1. DNS for {$DOMAIN} must already resolve to this host before the stack
+#      starts. Let's Encrypt validates by connecting back on port 80, so a name
+#      that does not resolve yet fails issuance — and repeated failures count
+#      against a rate limit that locks you out for hours.
+#
+#   2. Port 80 must stay open to the world. It is not only the redirect: it is
+#      how the HTTP-01 challenge reaches Caddy. Restricting it to a CDN's
+#      address range breaks renewal, silently, about sixty days later.
+#
+# There is also no explicit `:80` block. Caddy's automatic HTTPS already answers
+# the ACME challenge there and redirects everything else to HTTPS; adding a
+# catch-all of our own would shadow the challenge endpoint.
 
-{$DOMAIN} {
-	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
-
-	# "api" resolves via Docker's internal DNS to the api service — the two
-	# containers share the compose network, so this never touches the public
-	# internet and the api container publishes no host port of its own.
-	reverse_proxy api:8080
+{
+	# Where Let's Encrypt sends expiry and problem notices. Not required, but
+	# the one warning you actually want to receive.
+	email {$ACME_EMAIL}
 }
 
-# Cloudflare reaches this origin over 443 directly under "Full (strict)", but
-# if "Always Use HTTPS" is ever off at Cloudflare's edge a plain-HTTP request
-# can still arrive here. Redirect it rather than serve the app in the clear.
-:80 {
-	redir https://{$DOMAIN}{uri} permanent
+{$DOMAIN} {
+	# "api" resolves over the compose network, so this never leaves the host.
+	# The api container publishes nothing publicly — Caddy is the only way in.
+	reverse_proxy api:8080
 }
