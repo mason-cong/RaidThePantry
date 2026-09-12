@@ -106,9 +106,15 @@ services:
       # loopback from inside this container is the container itself.
       Scraping__AllowLoopbackHosts: "false"
 
-      # Raise this and re-run `promote --repromote` to re-transform the staged
-      # corpus after a normalizer change — no re-crawl, and recipe ids survive.
-      Scraping__ParserVersion: "${PARSER_VERSION:-1}"
+      # ParserVersion is deliberately NOT set here. It belongs to the build, not
+      # the deployment: the image's appsettings.json states which parser
+      # generation its own code is, and environment beats appsettings, so a
+      # default in this file would silently stamp promoted rows with a version
+      # the running parser is not. To re-transform after a normalizer change,
+      # raise it in appsettings.json and rebuild. For a one-off, override the
+      # single run instead of this file:
+      #   docker compose -f docker-compose.prod.yml run --rm \
+      #     -e Scraping__ParserVersion=5 worker promote --repromote
     volumes:
       # A directory rather than ./urls.txt directly: bind-mounting a file that
       # does not exist yet makes Docker silently create a *directory* in its
