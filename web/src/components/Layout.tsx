@@ -20,8 +20,11 @@ export function Layout() {
             <span className="text-2xl" aria-hidden="true">
               🍲
             </span>
+            {/* The brand, which is deliberately not the project name. The repo,
+                the .NET projects and the database still say RecipeApi — renaming
+                those would touch hundreds of files that no visitor ever sees. */}
             <span className="font-display text-xl font-bold tracking-tight text-ink-900">
-              RecipeFinder
+              Raid the Pantry
             </span>
           </Link>
 
